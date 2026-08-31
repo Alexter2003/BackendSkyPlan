@@ -9,3 +9,113 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+model User {
+  id                    Int       @id @default(autoincrement())
+  email                 String    @unique @db.VarChar(255)
+  username              String    @unique @db.VarChar(255)
+  passwordHash          String    @db.VarChar(255)
+  confirmationCode      String?   @db.VarChar(255)
+  emailConfirmed        Boolean   @default(false)
+  mustChangePassword    Boolean   @default(false)
+  tempPasswordExpiresAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  sessions       Session[]
+  passwordResets PasswordReset[]
+  visits         Visit[]
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  sessionToken String   @unique @db.VarChar(255)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordReset {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  resetToken String    @unique @db.VarChar(255)
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Visit {
+  id                  Int       @id @default(autoincrement())
+  userId              Int?
+  name                String    @db.VarChar(255)
+  latitude            Decimal   @db.Decimal(9, 6)
+  longitude           Decimal   @db.Decimal(10, 6)
+  temperature         Float
+  precipitation       Float
+  humidity            Float
+  atmosphericPressure Float
+  air                 Float
+  weatherUpdate       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  activities Activity[]
+
+  @@index([userId])
+}
+
+model Activity {
+  id          Int      @id @default(autoincrement())
+  visitId     Int
+  stateId     Int
+  name        String   @db.VarChar(255)
+  description String   @db.VarChar(255)
+  date        DateTime @db.Date
+  startTime   DateTime @db.Time
+  endTime     DateTime @db.Time
+
+  visit            Visit             @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  state            State             @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  activityWeathers ActivityWeather[]
+
+  @@index([visitId])
+  @@index([stateId])
+}
+
+model WeatherCondition {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(255)
+  description String   @db.VarChar(255)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  activityWeathers ActivityWeather[]
+}
+
+model ActivityWeather {
+  activityId         Int
+  weatherConditionId Int
+
+  activity         Activity         @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  weatherCondition WeatherCondition @relation(fields: [weatherConditionId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, weatherConditionId])
+}
+
+model State {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(255)
+
+  activities Activity[]
+}
