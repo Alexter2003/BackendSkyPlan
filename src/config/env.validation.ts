@@ -3,6 +3,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Max,
   Min,
@@ -31,6 +32,12 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   DIRECT_URL!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(4)
+  @Max(15)
+  BCRYPT_SALT_ROUNDS?: number;
 }
 
 export function validate(

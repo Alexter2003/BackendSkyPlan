@@ -11,6 +11,7 @@ Before installing anything new, search this file and `package.json` for an exist
 | `@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express` | NestJS framework core | scaffold | 2026-08-29 |
 | `@nestjs/config` | env var loading/validation (`ConfigModule`) | scaffold | 2026-08-29 |
 | `@prisma/client` | Prisma generated client — ORM/DB access. **Do not add another query builder or ORM (Drizzle, TypeORM, Sequelize, Knex, etc.) — Prisma is the only one used in this project.** | scaffold | 2026-08-29 |
+| `bcrypt` | Password hashing for `User.passwordHash` (registration, and future login/password-reset). **Do not add argon2 or another hashing lib alongside it — bcrypt is the project's implicit choice per `requirements-compliance`.** | Alexvy | 2026-09-15 |
 | `class-transformer` | DTO (de)serialization, used with `class-validator` | scaffold | 2026-08-29 |
 | `class-validator` | DTO validation decorators. **Do not add Zod/Joi/Yup for request validation — this is the standard for the whole API.** | scaffold | 2026-08-29 |
 | `reflect-metadata` | required by NestJS decorators | scaffold | 2026-08-29 |
@@ -23,6 +24,7 @@ Before installing anything new, search this file and `package.json` for an exist
 | `@nestjs/cli`, `@nestjs/schematics` | Nest CLI/codegen | scaffold | 2026-08-29 |
 | `@nestjs/mau` | Nest deployment tooling | scaffold | 2026-08-29 |
 | `@nestjs/testing` | NestJS testing utilities | scaffold | 2026-08-29 |
+| `@types/bcrypt` | type definitions for `bcrypt` | Alexvy | 2026-09-15 |
 | `oxlint` | linter. **Do not add ESLint alongside it — oxlint is the only linter for this repo.** | scaffold | 2026-08-29 |
 | `prettier` | formatter | scaffold | 2026-08-29 |
 | `prisma` | Prisma CLI (migrate, generate, studio, db seed) | scaffold | 2026-08-29 |
