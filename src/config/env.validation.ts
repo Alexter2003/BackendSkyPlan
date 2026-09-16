@@ -38,6 +38,14 @@ class EnvironmentVariables {
   @Min(4)
   @Max(15)
   BCRYPT_SALT_ROUNDS?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  RESEND_API_KEY!: string;
+
+  @IsOptional()
+  @IsString()
+  MAIL_FROM?: string;
 }
 
 export function validate(

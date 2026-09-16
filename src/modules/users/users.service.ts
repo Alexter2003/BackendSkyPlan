@@ -1,5 +1,5 @@
-import { randomBytes } from 'node:crypto';
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import type { User } from '@prisma/client';
@@ -11,6 +11,17 @@ import type { CreateUserDto } from './dto/create-user.dto.js';
 import type { UserPublic } from './interfaces/user-public.interface.js';
 
 const DEFAULT_BCRYPT_SALT_ROUNDS = 12;
+const CONFIRMATION_CODE_LENGTH = 5;
+const CONFIRMATION_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+function generateConfirmationCode(): string {
+  let code = '';
+  for (let i = 0; i < CONFIRMATION_CODE_LENGTH; i++) {
+    code +=
+      CONFIRMATION_CODE_ALPHABET[randomInt(CONFIRMATION_CODE_ALPHABET.length)];
+  }
+  return code;
+}
 
 function toUserPublic(user: User): UserPublic {
   return {
@@ -24,6 +35,8 @@ function toUserPublic(user: User): UserPublic {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -35,7 +48,7 @@ export class UsersService {
       this.config.get<number>('BCRYPT_SALT_ROUNDS') ??
       DEFAULT_BCRYPT_SALT_ROUNDS;
 
-    const confirmationCode = randomBytes(32).toString('hex');
+    const confirmationCode = generateConfirmationCode();
     const passwordHash = await bcrypt.hash(dto.password, saltRounds);
 
     const user = await this.prisma.user.create({
@@ -48,11 +61,17 @@ export class UsersService {
       },
     });
 
-    await this.mail.sendConfirmationEmail({
-      to: user.email,
-      username: user.username,
-      confirmationCode,
-    });
+    try {
+      await this.mail.sendConfirmationEmail({
+        to: user.email,
+        username: user.username,
+        confirmationCode,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send confirmation email to ${user.email}: ${(error as Error).message}`,
+      );
+    }
 
     return {
       status: HttpStatus.CREATED,

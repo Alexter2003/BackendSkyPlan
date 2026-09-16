@@ -54,13 +54,12 @@ describe('UsersService', () => {
     service = module.get<UsersService>(UsersService);
   });
 
-  it('creates the user with emailConfirmed false and a non-empty confirmationCode', async () => {
+  it('creates the user with emailConfirmed false and a 5-char uppercase alphanumeric confirmationCode', async () => {
     await service.create(input);
 
     const data = prisma.user.create.mock.calls[0][0].data;
     expect(data.emailConfirmed).toBe(false);
-    expect(data.confirmationCode).toEqual(expect.any(String));
-    expect(data.confirmationCode.length).toBeGreaterThan(0);
+    expect(data.confirmationCode).toMatch(/^[A-Z0-9]{5}$/);
   });
 
   it('hashes the password before persisting it', async () => {
@@ -96,5 +95,16 @@ describe('UsersService', () => {
     expect(mail.sendConfirmationEmail).toHaveBeenCalledWith(
       expect.objectContaining({ to: input.email, username: input.username }),
     );
+  });
+
+  it('still returns a success envelope when sending the confirmation email fails', async () => {
+    (mail.sendConfirmationEmail as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Resend failed to send confirmation email: invalid API key'),
+    );
+
+    const result = await service.create(input);
+
+    expect(result.status).toBe(HttpStatus.CREATED);
+    expect(result.data.id).toBe(createdUser.id);
   });
 });
