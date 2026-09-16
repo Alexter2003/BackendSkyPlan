@@ -25,3 +25,6 @@ pnpm-debug.log*
 
 # coverage
 /coverage
+
+# graphify (local-only tool, not shared with the team)
+graphify-out/
