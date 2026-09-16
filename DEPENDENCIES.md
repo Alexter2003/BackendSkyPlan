@@ -15,6 +15,7 @@ Before installing anything new, search this file and `package.json` for an exist
 | `class-transformer` | DTO (de)serialization, used with `class-validator` | scaffold | 2026-08-29 |
 | `class-validator` | DTO validation decorators. **Do not add Zod/Joi/Yup for request validation — this is the standard for the whole API.** | scaffold | 2026-08-29 |
 | `reflect-metadata` | required by NestJS decorators | scaffold | 2026-08-29 |
+| `resend` | Transactional email provider SDK — used to send account confirmation emails. **First and only email provider in this project; do not add nodemailer or another mail SDK alongside it.** | Alexvy | 2026-09-15 |
 | `rxjs` | required by NestJS (interceptors, observables) | scaffold | 2026-08-29 |
 
 ## Dev dependencies
