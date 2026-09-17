@@ -4,7 +4,6 @@ import { APP_FILTER } from '@nestjs/core';
 import { validate } from './config/env.validation.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
-import { HealthModule } from './health/health.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 @Module({
@@ -14,7 +13,6 @@ import { UsersModule } from './modules/users/users.module.js';
       validate,
     }),
     PrismaModule,
-    HealthModule,
     UsersModule,
   ],
   providers: [
