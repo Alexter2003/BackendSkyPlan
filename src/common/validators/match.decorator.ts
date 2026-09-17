@@ -4,9 +4,9 @@ import {
   ValidationOptions,
 } from 'class-validator';
 
-// Compares a property against another property on the same object (e.g.
-// passwordConfirmation === password). Reusable across any DTO that needs
-// double-confirmation of a field.
+// Compara una propiedad contra otra del mismo objeto (ej.
+// passwordConfirmation === password). Reutilizable en cualquier DTO que
+// necesite doble confirmación de un campo.
 export function Match(
   property: string,
   validationOptions?: ValidationOptions,
@@ -28,7 +28,7 @@ export function Match(
         },
         defaultMessage(args: ValidationArguments): string {
           const [relatedPropertyName] = args.constraints as [string];
-          return `${args.property} must match ${relatedPropertyName}`;
+          return `${args.property} debe coincidir con ${relatedPropertyName}`;
         },
       },
     });

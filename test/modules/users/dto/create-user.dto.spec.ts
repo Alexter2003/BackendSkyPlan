@@ -29,7 +29,7 @@ describe('CreateUserDto', () => {
     );
     expect(match).toBeDefined();
     expect(match?.constraints).toMatchObject({
-      match: 'passwordConfirmation must match password',
+      match: 'passwordConfirmation debe coincidir con password',
     });
   });
 });

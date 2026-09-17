@@ -1,4 +1,5 @@
-// Shape returned to clients. Never includes passwordHash or confirmationCode.
+// Forma devuelta a los clientes. Nunca incluye passwordHash ni el código
+// de confirmación.
 export interface UserPublic {
   id: number;
   email: string;

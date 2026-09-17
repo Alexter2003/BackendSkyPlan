@@ -9,9 +9,9 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 
 const STATUS_BY_CODE: Record<string, HttpStatus> = {
-  P2002: HttpStatus.CONFLICT, // unique constraint violation
-  P2025: HttpStatus.NOT_FOUND, // record not found
-  P2003: HttpStatus.BAD_REQUEST, // foreign key constraint violation
+  P2002: HttpStatus.CONFLICT, // violación de restricción única
+  P2025: HttpStatus.NOT_FOUND, // registro no encontrado
+  P2003: HttpStatus.BAD_REQUEST, // violación de llave foránea
 };
 
 @Catch(Prisma.PrismaClientKnownRequestError)
@@ -32,8 +32,8 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message: STATUS_BY_CODE[exception.code]
-        ? `Database error (${exception.code})`
-        : 'Internal server error',
+        ? `Error de base de datos (${exception.code})`
+        : 'Error interno del servidor',
     });
   }
 }
