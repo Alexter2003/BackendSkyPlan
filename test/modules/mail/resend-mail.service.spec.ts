@@ -14,6 +14,7 @@ describe('ResendMailService', () => {
     to: 'test@skyplan.dev',
     username: 'testuser',
     confirmationCode: 'abc123',
+    expiresInMinutes: 30,
   };
 
   beforeEach(() => {
@@ -45,6 +46,20 @@ describe('ResendMailService', () => {
         to: payload.to,
         html: expect.stringContaining(payload.confirmationCode),
         text: expect.stringContaining(payload.confirmationCode),
+      }),
+    );
+  });
+
+  it('includes the expiration time in the email body', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'email_1' }, error: null });
+    const service = createService({ RESEND_API_KEY: 're_test' });
+
+    await service.sendConfirmationEmail(payload);
+
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('30 minutes'),
+        text: expect.stringContaining('30 minutes'),
       }),
     );
   });
