@@ -23,6 +23,7 @@ export class ResendMailService implements MailPort {
     const { subject, html, text } = buildConfirmationEmail(
       payload.username,
       payload.confirmationCode,
+      payload.expiresInMinutes,
     );
 
     const { error } = await this.resend.emails.send({

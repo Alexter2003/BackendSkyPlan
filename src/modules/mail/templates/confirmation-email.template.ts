@@ -7,6 +7,7 @@ export interface ConfirmationEmailContent {
 export function buildConfirmationEmail(
   username: string,
   confirmationCode: string,
+  expiresInMinutes: number,
 ): ConfirmationEmailContent {
   const subject = 'Confirm your SkyPlan account';
 
@@ -33,6 +34,11 @@ export function buildConfirmationEmail(
               </td>
             </tr>
             <tr>
+              <td style="color: #8a8a8a; font-size: 12px; padding-bottom: 8px;">
+                This code expires in ${expiresInMinutes} minutes.
+              </td>
+            </tr>
+            <tr>
               <td style="color: #8a8a8a; font-size: 12px;">
                 If you didn't create a SkyPlan account, you can ignore this email.
               </td>
@@ -43,7 +49,7 @@ export function buildConfirmationEmail(
     </table>
   `;
 
-  const text = `Welcome to SkyPlan, ${username}!\n\nYour confirmation code is: ${confirmationCode}\n\nIf you didn't create a SkyPlan account, you can ignore this email.`;
+  const text = `Welcome to SkyPlan, ${username}!\n\nYour confirmation code is: ${confirmationCode}\n\nThis code expires in ${expiresInMinutes} minutes.\n\nIf you didn't create a SkyPlan account, you can ignore this email.`;
 
   return { subject, html, text };
 }
