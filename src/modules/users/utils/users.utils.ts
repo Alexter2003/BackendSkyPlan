@@ -1,7 +1,7 @@
 import { randomInt } from 'node:crypto';
 import type { Prisma, User } from '@prisma/client';
-import type { PrismaService } from '../../prisma/prisma.service.js';
-import type { UserPublic } from './interfaces/user-public.interface.js';
+import type { PrismaService } from '../../../prisma/prisma.service.js';
+import type { UserPublic } from '../interfaces/user-public.interface.js';
 
 const CONFIRMATION_CODE_LENGTH = 5;
 const CONFIRMATION_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';

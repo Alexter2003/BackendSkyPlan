@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { ServiceResponse } from '../../common/interfaces/service-response.interface.js';
 import { MAIL_PORT } from '../mail/interfaces/mail-port.interface.js';
@@ -17,7 +18,7 @@ import type { CreateUserDto } from './dto/create-user.dto.js';
 import type { ConfirmEmailDto } from './dto/confirm-email.dto.js';
 import type { ResendConfirmationDto } from './dto/resend-confirmation.dto.js';
 import type { UserPublic } from './interfaces/user-public.interface.js';
-import { issueConfirmationCode, toUserPublic } from './users.utils.js';
+import { issueConfirmationCode, toUserPublic } from './utils/users.utils.js';
 
 const DEFAULT_BCRYPT_SALT_ROUNDS = 12;
 const CONFIRMATION_CODE_TTL_MINUTES = 30;
@@ -28,6 +29,13 @@ const MAX_CONFIRMATION_ATTEMPTS = 5;
 // endpoint se convierte en un oráculo de qué correos están registrados.
 const INVALID_OR_EXPIRED_CODE_MESSAGE =
   'Código de confirmación inválido o expirado';
+
+// Traduce las columnas de la restricción única violada (User.email,
+// User.username) a algo legible para el cliente de la API.
+const UNIQUE_FIELD_LABELS: Record<string, string> = {
+  email: 'correo',
+  username: 'nombre de usuario',
+};
 
 @Injectable()
 export class UsersService {
@@ -46,23 +54,9 @@ export class UsersService {
 
     const passwordHash = await bcrypt.hash(dto.password, saltRounds);
 
-    const { user, confirmationCode } = await this.prisma.$transaction(
-      async (tx) => {
-        const user = await tx.user.create({
-          data: {
-            email: dto.email,
-            username: dto.username,
-            passwordHash,
-            emailConfirmed: false,
-          },
-        });
-        const { code } = await issueConfirmationCode(
-          tx,
-          user.id,
-          CONFIRMATION_CODE_TTL_MINUTES,
-        );
-        return { user, confirmationCode: code };
-      },
+    const { user, confirmationCode } = await this.createUserRecord(
+      dto,
+      passwordHash,
     );
 
     try {
@@ -83,6 +77,47 @@ export class UsersService {
       message: 'Usuario registrado exitosamente',
       data: toUserPublic(user),
     };
+  }
+
+  private async createUserRecord(
+    dto: CreateUserDto,
+    passwordHash: string,
+  ): Promise<{ user: User; confirmationCode: string }> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email: dto.email,
+            username: dto.username,
+            passwordHash,
+            emailConfirmed: false,
+          },
+        });
+        const { code } = await issueConfirmationCode(
+          tx,
+          user.id,
+          CONFIRMATION_CODE_TTL_MINUTES,
+        );
+        return { user, confirmationCode: code };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = error.meta?.target;
+        const fields = Array.isArray(target) ? target : [];
+        const labels = fields.map(
+          (field) => UNIQUE_FIELD_LABELS[field] ?? field,
+        );
+        throw new ConflictException(
+          `Ya existe un usuario registrado con ese ${
+            labels.join(', ') || 'correo o nombre de usuario'
+          }`,
+        );
+      }
+      throw error;
+    }
   }
 
   async confirmEmail(

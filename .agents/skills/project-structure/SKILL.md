@@ -86,7 +86,7 @@ async create(dto: CreateUserDto): Promise<ServiceResponse<UserPublic>> {
 - `status` always uses NestJS's `HttpStatus` enum — never a custom string literal (`'success'`/`'error'`).
 - `data` is typed per-service via the feature's own response interface (e.g. `UserPublic`).
 - Controllers return the service's `ServiceResponse<T>` as-is; they don't unwrap or rebuild it.
-- Error paths still go through thrown exceptions (caught by `PrismaExceptionFilter` / Nest's own exception handling) — this envelope is for the success path only.
+- Error paths go through explicitly thrown `HttpException` subclasses (`BadRequestException`, `ConflictException`, etc.) inside the service — never a manually-built error response. Services catch their own expected infrastructure errors (e.g. a Prisma `P2002` unique-constraint violation) and re-throw them as a controlled `HttpException`. The single global `AllExceptionsFilter` (`src/common/filters/`) only normalizes the response shape for exceptions already thrown this way, and falls back to a generic 500 for anything unrecognized — it does not interpret error codes itself. This envelope is for the success path only.
 
 ## When adding a new feature
 
