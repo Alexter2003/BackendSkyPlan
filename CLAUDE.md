@@ -16,6 +16,19 @@ This repo ships its own skills under `.agents/skills/` (symlinked into `.claude/
 
 Also available (general, not team-authored): `nestjs-best-practices`, `nodejs-backend-patterns`, `nodejs-best-practices`, `oxlint`, `prisma-cli`, `prisma-client-api`, `prisma-database-setup`, `prisma-postgres`, `typescript-advanced-types`, `vitest`.
 
+## Language override (this project only)
+
+The developer's global config (`~/.claude/CLAUDE.md`) locks code/comments/commit messages to
+English. For **this project specifically**, that's overridden as follows — the global file is
+left untouched, this is a project-local exception:
+
+- **API response messages** (anything the client sees: `ServiceResponse.message`, exception
+  messages thrown via `BadRequestException`/`ConflictException`/etc., `class-validator` DTO
+  error messages) → **Spanish**.
+- **Code comments** → **Spanish**.
+- Everything else (identifiers, code itself, commit messages) → still **English**, per the
+  global rule — this override does not extend to those.
+
 ## Hard rules (summary — full detail lives in the skills above)
 
 1. **Never commit or push directly to `main`.** Branch → PR → squash-merge, always. See [git-workflow](.agents/skills/git-workflow/SKILL.md).

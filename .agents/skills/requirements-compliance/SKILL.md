@@ -55,6 +55,23 @@ correctness there over polish elsewhere.
   password to be submitted/validated in a way that supports it (e.g. reject if the endpoint
   is called without `mustChangePassword` being true, so the flow can't be skipped).
 
+  **Implementation note for whoever builds this flow:** `AuthService.login` (`src/modules/auth/`)
+  intentionally does **not** block or validate `tempPasswordExpiresAt` — it only returns
+  `mustChangePassword` in the response so the client can route to the change-password screen.
+  Login must keep succeeding for any account with valid credentials, `isActive` and
+  `emailConfirmed`; forcing the change and rejecting an expired temp password is **not**
+  login's job. That enforcement belongs to whatever consumes the temp password next:
+  - The **change-password endpoint** itself should reject when `tempPasswordExpiresAt` has
+    passed (the user has to request a new recovery instead).
+  - The **auth guard** (`SessionGuard`, `src/common/guards/session.guard.ts` — implemented,
+    applied globally via `APP_GUARD`) is the right place to add this check. Today it validates
+    session + `isActive` only; it does **not** yet block on `mustChangePassword`. Add that
+    check there once the change-password endpoint exists, since it has to apply to *every*
+    protected endpoint, not just login.
+  Do not re-add a `tempPasswordExpiresAt` check inside `login()` — it was deliberately
+  removed from there once so it wouldn't conflate "can this session be created" with "is this
+  temp password still usable."
+
 ### 3. Módulo de Ubicaciones (20%) — `Visit` model in this schema
 - Create endpoint storing a location's essential data, **including coordinates** — this is an
   explicit requirement in the brief ("las coordenadas de la ubicación deben de almacenarse en

@@ -15,25 +15,42 @@ model User {
   email                 String    @unique @db.VarChar(255)
   username              String    @unique @db.VarChar(255)
   passwordHash          String    @db.VarChar(255)
-  confirmationCode      String?   @db.VarChar(255)
   emailConfirmed        Boolean   @default(false)
+  isActive              Boolean   @default(true)
   mustChangePassword    Boolean   @default(false)
   tempPasswordExpiresAt DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  sessions       Session[]
-  passwordResets PasswordReset[]
-  visits         Visit[]
+  sessions           Session[]
+  passwordResets     PasswordReset[]
+  emailConfirmations EmailConfirmation[]
+  visits             Visit[]
+}
+
+model EmailConfirmation {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  code      String    @db.VarChar(255)
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Session {
-  id           Int      @id @default(autoincrement())
-  userId       Int
-  sessionToken String   @unique @db.VarChar(255)
-  expiresAt    DateTime
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  tokenHash  String    @unique @db.VarChar(64)
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
