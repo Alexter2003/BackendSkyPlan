@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Public } from '../../common/decorators/public.decorator.js';
 import type { ServiceResponse } from '../../common/interfaces/service-response.interface.js';
 import { ConfirmEmailDto } from './dto/confirm-email.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
@@ -10,12 +11,14 @@ import { UsersService } from './users.service.js';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Public()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateUserDto): Promise<ServiceResponse<UserPublic>> {
     return this.usersService.create(dto);
   }
 
+  @Public()
   @Post('confirm-email')
   @HttpCode(HttpStatus.OK)
   confirmEmail(
@@ -24,6 +27,7 @@ export class UsersController {
     return this.usersService.confirmEmail(dto);
   }
 
+  @Public()
   @Post('resend-confirmation')
   @HttpCode(HttpStatus.OK)
   resendConfirmation(
