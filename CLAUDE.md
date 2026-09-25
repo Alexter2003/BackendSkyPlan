@@ -13,6 +13,7 @@ This repo ships its own skills under `.agents/skills/` (symlinked into `.claude/
 - **[git-workflow](.agents/skills/git-workflow/SKILL.md)** — branch naming, mandatory PR flow, squash-merge. Load before starting work on any feature/fix, and before merging.
 - **[dependency-management](.agents/skills/dependency-management/SKILL.md)** — check `DEPENDENCIES.md` before installing anything. Load before running `pnpm add`.
 - **[requirements-compliance](.agents/skills/requirements-compliance/SKILL.md)** — checks work against the official course project brief (login, user, locations, activities, pending-activities modules) and their grading weights. Load before starting or closing out a module, and before adding any extra/innovative feature, to confirm it doesn't replace or weaken a base requirement.
+- **[client-api-docs](.agents/skills/client-api-docs/SKILL.md)** — generates client-facing Markdown API docs (`docs/api/<flow>.md`) for a given module/flow, for handing off to the Flutter client. Invoke with `/client-api-docs <module>`.
 
 Also available (general, not team-authored): `nestjs-best-practices`, `nodejs-backend-patterns`, `nodejs-best-practices`, `oxlint`, `prisma-cli`, `prisma-client-api`, `prisma-database-setup`, `prisma-postgres`, `typescript-advanced-types`, `vitest`.
 
@@ -44,6 +45,7 @@ left untouched, this is a project-local exception:
 - **Linter**: `oxlint` (no ESLint)
 - **Test runner**: `vitest` (no Jest)
 - **DB**: PostgreSQL via Supabase, no `@map`/`@@map` in `prisma/schema.prisma` — Prisma model/field names are used verbatim as table/column names (case-sensitive quoted identifiers in Postgres)
+- **Closed value sets**: use a Prisma `enum` when the set is part of the domain and only changes with a deploy (e.g. `VisitStatus`). Use a lookup table + seed when rows are admin-managed data or carry fields of their own beyond the name (e.g. `State`, `WeatherCondition`). Don't turn a set into a table "just in case" — if nothing will ever manage it from the app, it's an enum.
 - **Auth**: custom NestJS auth (`User`/`Session`/`PasswordReset` models) — not Supabase Auth
 - **RLS**: intentionally left off Supabase tables. The backend connects via the Postgres connection string (`DATABASE_URL`/`DIRECT_URL`), never via the Supabase anon key from a client — RLS would only become necessary if a client ever talks to Supabase directly (e.g. `@supabase/supabase-js` in the mobile app for auth/storage/realtime). If that changes, revisit this.
 
