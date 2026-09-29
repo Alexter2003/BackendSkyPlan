@@ -162,7 +162,7 @@ en su lugar:
 
 ---
 
-## 2. Listar visitas — `POST /api/visits` → `GET /api/visits`
+## 2. Listar visitas — `GET /api/visits`
 
 Devuelve todas las visitas activas (no eliminadas) del usuario autenticado, ordenadas por
 fecha ascendente. Incluye visitas en cualquier `status` (`PLANNED`, `COMPLETED`,
