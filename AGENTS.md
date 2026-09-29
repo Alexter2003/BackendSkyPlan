@@ -17,10 +17,23 @@ Each standard below is documented in full as a skill under `.agents/skills/<name
 | [`.agents/skills/git-workflow/SKILL.md`](.agents/skills/git-workflow/SKILL.md) | starting a feature/fix, or merging a PR |
 | [`.agents/skills/dependency-management/SKILL.md`](.agents/skills/dependency-management/SKILL.md) | running `pnpm add` / `pnpm add -D` |
 | [`.agents/skills/requirements-compliance/SKILL.md`](.agents/skills/requirements-compliance/SKILL.md) | starting/closing a module, or adding an extra/innovative feature |
+| [`.agents/skills/client-api-docs/SKILL.md`](.agents/skills/client-api-docs/SKILL.md) | generating client-facing Markdown API docs (`docs/api/<flow>.md`) for the Flutter client — invoke with `/client-api-docs <module>` |
 
 Also present (general framework/tooling knowledge, not project-specific rules): `nestjs-best-practices`, `nodejs-backend-patterns`, `nodejs-best-practices`, `oxlint`, `prisma-cli`, `prisma-client-api`, `prisma-database-setup`, `prisma-postgres`, `typescript-advanced-types`, `vitest`.
 
 `DEPENDENCIES.md` at the repo root is the running log of installed packages and why — check it before adding anything new.
+
+## Language override (this project only)
+
+Code, identifiers, and commit messages stay in English. But for content the client/user sees or
+that documents intent inline, use **Spanish**:
+
+- **API response messages** — anything the client sees: `ServiceResponse.message`, exception
+  messages thrown via `BadRequestException`/`ConflictException`/etc., `class-validator` DTO
+  error messages.
+- **Code comments** — in Spanish.
+
+Everything else (identifiers, code itself, commit messages) stays in English.
 
 ## Non-negotiable rules
 
@@ -35,6 +48,7 @@ Also present (general framework/tooling knowledge, not project-specific rules): 
 
 - Schema lives in `prisma/schema.prisma`. No `@map`/`@@map` — Prisma names are used verbatim as Postgres identifiers (case-sensitive).
 - Any schema change requires a generated, committed migration: `pnpm prisma migrate dev --name <name>`. Never edit tables directly from the Supabase Table Editor.
+- **Closed value sets**: use a Prisma `enum` when the set is part of the domain and only changes with a deploy (e.g. `VisitStatus`). Use a lookup table + seed when rows are admin-managed data or carry fields of their own beyond the name (e.g. `State`, `WeatherCondition`). Don't turn a set into a table "just in case" — if nothing will ever manage it from the app, it's an enum.
 - Custom NestJS auth (`User`/`Session`/`PasswordReset` models) — not Supabase Auth.
 - Supabase Row Level Security is intentionally off: the backend talks to Postgres directly via `DATABASE_URL`/`DIRECT_URL`, never through the Supabase anon key from a client. This would need to be revisited only if a client ever calls Supabase directly.
 

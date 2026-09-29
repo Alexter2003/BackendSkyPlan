@@ -21,6 +21,7 @@ src/
       <feature>.controller.ts
       <feature>.service.ts
       <feature>.module.ts
+      <feature>-<task>.cron.ts   # scheduled tasks for this feature (e.g. visits-weather.cron.ts)
   common/
     filters/          # exception filters
     guards/            # auth/role guards
@@ -56,6 +57,7 @@ test/                  # mirrors src/ exactly — see rule 6
 6. **Tests live in the top-level `test/` folder, mirroring `src/`'s structure exactly** — not beside the source file. E.g. `src/modules/users/users.service.ts` → `test/modules/users/users.service.spec.ts`; `src/health/health.controller.ts` → `test/health/health.controller.spec.ts`. E2e specs (`*.e2e-spec.ts`) stay directly under `test/` per the existing Vitest e2e config. `test/` is committed — every dev and CI must have access to the suite.
 7. **Services return `ServiceResponse<T>`** (`src/common/interfaces/service-response.interface.ts`) from every method that hands data back to a controller — see "Standard service response envelope" below.
 8. Before creating a new module, check `src/modules/` for an existing feature it could extend instead of creating a near-duplicate (e.g. don't create `weather/` and `weather-conditions/` as separate modules if one already covers the domain).
+9. **Scheduled tasks** (`@nestjs/schedule` `@Cron`/`@Interval` jobs) live inside the feature they belong to, as `<feature>-<task>.cron.ts`, registered as a provider in that feature's module — not in `src/common/`. The cron class orchestrates only (query, group, iterate); it reuses the feature's existing utils/services for actual business logic rather than duplicating it. Only move it to `src/common/` if it genuinely spans more than one feature.
 
 ## Standard service response envelope
 

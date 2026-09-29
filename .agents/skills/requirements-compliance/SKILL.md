@@ -110,6 +110,24 @@ correctness there over polish elsewhere.
   forecast weather vs. the activity's desired `WeatherCondition` list — this is graded output,
   not a display detail, so it must come from the API, not be computed ad-hoc in Flutter.
 
+## Team-adopted scope (beyond the graded checklist)
+
+These are not in the official brief, but the team has adopted them as committed project scope —
+not "extras" pending a decision. They still must follow rule 1 below (additive, never replacing a
+graded requirement) and every other team standard.
+
+- **Visit status** (`VisitStatus`: `PLANNED` / `COMPLETED` / `CANCELLED`) on the `Visit` model,
+  with dedicated `complete`/`cancel` actions. This is additive on top of Módulo de Ubicaciones
+  (20%) — it does not change create/edit/delete/list. It is **not** a substitute for 5.d
+  ("Endpoint to mark an activity as completed") — that graded requirement is on `Activity` and
+  remains a separate, still-pending obligation.
+- **Automatic forecast refresh** via a scheduled task (`@nestjs/schedule`) that keeps `Visit`
+  weather data current for upcoming dates and backfills it once a visit created beyond the
+  10-day forecast window falls inside it. This makes good on the API's own message to the
+  client ("los datos climáticos se cargarán cuando la fecha esté dentro de los próximos 10
+  días") — it isn't graded directly, but it's load-bearing for the Actividades Pendientes
+  feasibility indicator (5.e), which needs current weather to be meaningful.
+
 ## Adding something extra or innovative
 
 The brief allows extending the project — as long as it never changes, weakens, or replaces a

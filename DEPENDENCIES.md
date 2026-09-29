@@ -10,6 +10,7 @@ Before installing anything new, search this file and `package.json` for an exist
 |---|---|---|---|
 | `@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express` | NestJS framework core | scaffold | 2026-08-29 |
 | `@nestjs/config` | env var loading/validation (`ConfigModule`) | scaffold | 2026-08-29 |
+| `@nestjs/schedule` | In-process cron/scheduled tasks (`@Cron`), used by `VisitsWeatherCron` to refresh forecast data daily. **First and only scheduler in this project — do not add `node-cron` or `bull`/`@nestjs/bull` alongside it.** | Alexvy | 2026-09-23 |
 | `@prisma/client` | Prisma generated client — ORM/DB access. **Do not add another query builder or ORM (Drizzle, TypeORM, Sequelize, Knex, etc.) — Prisma is the only one used in this project.** | scaffold | 2026-08-29 |
 | `bcrypt` | Password hashing for `User.passwordHash` (registration, and future login/password-reset). **Do not add argon2 or another hashing lib alongside it — bcrypt is the project's implicit choice per `requirements-compliance`.** | Alexvy | 2026-09-15 |
 | `class-transformer` | DTO (de)serialization, used with `class-validator` | scaffold | 2026-08-29 |

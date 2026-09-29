@@ -71,25 +71,35 @@ model PasswordReset {
   @@index([userId])
 }
 
-model Visit {
-  id                  Int       @id @default(autoincrement())
-  userId              Int?
-  name                String    @db.VarChar(255)
-  latitude            Decimal   @db.Decimal(9, 6)
-  longitude           Decimal   @db.Decimal(10, 6)
-  temperature         Float
-  precipitation       Float
-  humidity            Float
-  atmosphericPressure Float
-  air                 Float
-  weatherUpdate       DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+enum VisitStatus {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
 
-  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+model Visit {
+  id                  Int         @id @default(autoincrement())
+  userId              Int
+  name                String      @db.VarChar(255)
+  latitude            Decimal     @db.Decimal(9, 6)
+  longitude           Decimal     @db.Decimal(10, 6)
+  date                DateTime    @db.Date
+  status              VisitStatus @default(PLANNED)
+  temperature         Float?
+  precipitation       Float?
+  humidity            Float?
+  atmosphericPressure Float?
+  weatherUpdate       DateTime?
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   activities Activity[]
 
   @@index([userId])
+  @@index([userId, isActive, date])
+  @@index([status, date])
 }
 
 model Activity {
@@ -101,6 +111,7 @@ model Activity {
   date        DateTime @db.Date
   startTime   DateTime @db.Time
   endTime     DateTime @db.Time
+  isActive    Boolean  @default(true)
 
   visit            Visit             @relation(fields: [visitId], references: [id], onDelete: Cascade)
   state            State             @relation(fields: [stateId], references: [id], onDelete: Restrict)
