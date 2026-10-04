@@ -29,6 +29,9 @@ Authorization: Bearer <token>
 Cada actividad pertenece a una visita del usuario autenticado. Una actividad o visita de otro
 usuario responde `404`, nunca `403`.
 
+Para el recorrido completo (visita, actividades, clima y notificaciones) ver
+`docs/api/activities-flow.md`.
+
 ---
 
 ## El objeto `Activity`

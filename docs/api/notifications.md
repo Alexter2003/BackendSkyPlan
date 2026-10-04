@@ -1,5 +1,7 @@
 # SkyPlan API — Notificaciones en tiempo real
 
+Para el recorrido completo ver `docs/api/activities-flow.md`.
+
 Avisos cuando una actividad **al aire libre** deja de ser viable por un cambio en el
 pronóstico, o vuelve a serlo. Hay dos canales que entregan lo mismo:
 
