@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { ActivityViabilityService } from '../activities/activity-viability.service.js';
 import { FORECAST_MAX_DAYS } from '../weather/constants/weather.constants.js';
 import { WEATHER_PORT } from '../weather/interfaces/weather-port.interface.js';
 import type { WeatherPort } from '../weather/interfaces/weather-port.interface.js';
@@ -38,9 +39,10 @@ export class VisitsWeatherCron {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(WEATHER_PORT) private readonly weather: WeatherPort,
+    private readonly viability: ActivityViabilityService,
   ) {}
 
-  @Cron('0 3 * * *', {
+  @Cron('0 */6 * * *', {
     name: 'refresh-visit-weather',
     timeZone: 'America/Guatemala',
   })
@@ -105,11 +107,21 @@ export class VisitsWeatherCron {
                 continue;
               }
 
-              await this.prisma.visit.update({
+              const updatedVisit = await this.prisma.visit.update({
                 where: { id: visit.id },
                 data: buildWeatherFields(snapshot),
               });
               updated += 1;
+
+              // Un fallo al reevaluar actividades no debe contarse como fallo
+              // de clima ni detener el resto del grupo.
+              try {
+                await this.viability.evaluateVisitActivities(updatedVisit);
+              } catch (error) {
+                this.logger.warn(
+                  `Fallo al reevaluar actividades de la visita ${visit.id}: ${(error as Error).message}`,
+                );
+              }
             }
           } catch (error) {
             failed += group.visits.length;

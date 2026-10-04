@@ -1,10 +1,10 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import type { Activity, State, Visit } from '@prisma/client';
+import type { Visit } from '@prisma/client';
 import { VisitStatus } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
 import type { WeatherSnapshot } from '../../weather/interfaces/weather-port.interface.js';
+import type { ActivityPublic } from '../../activities/interfaces/activity-public.interface.js';
 import type {
-  VisitActivity,
   VisitDetail,
   VisitPublic,
 } from '../interfaces/visit-public.interface.js';
@@ -14,6 +14,9 @@ export interface VisitWeatherFields {
   precipitation: number | null;
   humidity: number | null;
   atmosphericPressure: number | null;
+  cloudCover: number | null;
+  windSpeed: number | null;
+  weatherCode: number | null;
   weatherUpdate: Date | null;
 }
 
@@ -41,29 +44,21 @@ export function toVisitPublic(visit: Visit): VisitPublic {
     precipitation: visit.precipitation,
     humidity: visit.humidity,
     atmosphericPressure: visit.atmosphericPressure,
+    cloudCover: visit.cloudCover,
+    windSpeed: visit.windSpeed,
+    weatherCode: visit.weatherCode,
     weatherUpdate: visit.weatherUpdate,
     createdAt: visit.createdAt,
   };
 }
 
-function toVisitActivity(activity: Activity & { state: State }): VisitActivity {
-  return {
-    id: activity.id,
-    name: activity.name,
-    description: activity.description,
-    date: formatVisitDate(activity.date),
-    startTime: formatTime(activity.startTime),
-    endTime: formatTime(activity.endTime),
-    state: { id: activity.state.id, name: activity.state.name },
-  };
-}
-
 export function toVisitDetail(
-  visit: Visit & { activities: (Activity & { state: State })[] },
+  visit: Visit,
+  activities: ActivityPublic[],
 ): VisitDetail {
   return {
     ...toVisitPublic(visit),
-    activities: visit.activities.map(toVisitActivity),
+    activities,
   };
 }
 
@@ -76,6 +71,9 @@ export function buildWeatherFields(
       precipitation: null,
       humidity: null,
       atmosphericPressure: null,
+      cloudCover: null,
+      windSpeed: null,
+      weatherCode: null,
       weatherUpdate: null,
     };
   }
@@ -84,6 +82,9 @@ export function buildWeatherFields(
     precipitation: snapshot.precipitation,
     humidity: snapshot.humidity,
     atmosphericPressure: snapshot.atmosphericPressure,
+    cloudCover: snapshot.cloudCover,
+    windSpeed: snapshot.windSpeed,
+    weatherCode: snapshot.weatherCode,
     weatherUpdate: new Date(),
   };
 }

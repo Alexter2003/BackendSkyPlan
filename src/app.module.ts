@@ -9,6 +9,8 @@ import { SessionGuard } from './common/guards/session.guard.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { VisitsModule } from './modules/visits/visits.module.js';
+import { ActivitiesModule } from './modules/activities/activities.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { VisitsModule } from './modules/visits/visits.module.js';
     UsersModule,
     AuthModule,
     VisitsModule,
+    ActivitiesModule,
+    NotificationsModule,
   ],
   providers: [
     {

@@ -11,6 +11,7 @@ import {
   WEATHER_PORT,
   WeatherPort,
 } from '../../../src/modules/weather/interfaces/weather-port.interface.js';
+import { ActivityViabilityService } from '../../../src/modules/activities/activity-viability.service.js';
 import { VisitsService } from '../../../src/modules/visits/visits.service.js';
 import type { CreateVisitDto } from '../../../src/modules/visits/dto/create-visit.dto.js';
 import type { UpdateVisitDto } from '../../../src/modules/visits/dto/update-visit.dto.js';
@@ -31,6 +32,9 @@ type PrismaMock = {
   activity: {
     updateMany: ReturnType<typeof vi.fn>;
   };
+  state: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   $transaction: ReturnType<typeof vi.fn>;
 };
 
@@ -44,6 +48,9 @@ function createPrismaMock(): PrismaMock {
     },
     activity: {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    state: {
+      findUnique: vi.fn().mockResolvedValue({ id: 3, name: 'cancelled' }),
     },
     $transaction: vi.fn(),
   };
@@ -59,6 +66,7 @@ describe('VisitsService', () => {
   let service: VisitsService;
   let prisma: PrismaMock;
   let weather: WeatherPort;
+  let viability: { evaluateVisitActivities: ReturnType<typeof vi.fn> };
 
   const userId = 1;
 
@@ -67,6 +75,9 @@ describe('VisitsService', () => {
     humidity: 71,
     precipitation: 0.2,
     atmosphericPressure: 1013.4,
+    cloudCover: 85,
+    windSpeed: 12.5,
+    weatherCode: 61,
   };
 
   const baseVisit = {
@@ -81,6 +92,9 @@ describe('VisitsService', () => {
     precipitation: snapshot.precipitation,
     humidity: snapshot.humidity,
     atmosphericPressure: snapshot.atmosphericPressure,
+    cloudCover: snapshot.cloudCover,
+    windSpeed: snapshot.windSpeed,
+    weatherCode: snapshot.weatherCode,
     weatherUpdate: new Date('2026-09-20T12:00:00Z'),
     isActive: true,
     createdAt: new Date('2026-09-20T12:00:00Z'),
@@ -99,6 +113,9 @@ describe('VisitsService', () => {
     vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
 
     prisma = createPrismaMock();
+    viability = {
+      evaluateVisitActivities: vi.fn().mockResolvedValue(undefined),
+    };
     prisma.visit.findFirst.mockResolvedValue(null);
     prisma.visit.create.mockResolvedValue(baseVisit);
     prisma.visit.update.mockResolvedValue(baseVisit);
@@ -114,6 +131,7 @@ describe('VisitsService', () => {
         VisitsService,
         { provide: PrismaService, useValue: prisma },
         { provide: WEATHER_PORT, useValue: weather },
+        { provide: ActivityViabilityService, useValue: viability },
       ],
     }).compile();
 
@@ -195,12 +213,17 @@ describe('VisitsService', () => {
         activities: [
           {
             id: 5,
+            visitId: baseVisit.id,
             name: 'Caminata',
             description: 'Cerro de la Cruz',
-            date: new Date('2026-09-28T00:00:00Z'),
+            type: 'OUTDOOR',
             startTime: new Date('1970-01-01T08:00:00Z'),
             endTime: new Date('1970-01-01T10:30:00Z'),
-            state: { id: 1, name: 'Pendiente' },
+            isViable: true,
+            viabilityCheckedAt: null,
+            completedAt: null,
+            state: { id: 1, name: 'planned' },
+            activityWeathers: [{ weatherCondition: { id: 3, name: 'cloudy' } }],
           },
         ],
       });
@@ -208,9 +231,13 @@ describe('VisitsService', () => {
       const result = await service.findOne(userId, baseVisit.id);
 
       expect(result.data.activities[0]).toMatchObject({
+        date: '2026-09-28',
         startTime: '08:00',
         endTime: '10:30',
-        state: { id: 1, name: 'Pendiente' },
+        type: 'OUTDOOR',
+        isViable: true,
+        state: { id: 1, name: 'planned' },
+        weatherConditions: [{ id: 3, name: 'cloudy' }],
       });
     });
 
@@ -232,6 +259,22 @@ describe('VisitsService', () => {
       expect(weather.getSnapshot).not.toHaveBeenCalled();
       const data = prisma.visit.update.mock.calls[0][0].data;
       expect(data).not.toHaveProperty('temperature');
+    });
+
+    it('re-evaluates the activities viability when the location or date changes', async () => {
+      prisma.visit.findFirst.mockResolvedValue(baseVisit);
+
+      await service.update(userId, baseVisit.id, { latitude: 15.1 });
+
+      expect(viability.evaluateVisitActivities).toHaveBeenCalledWith(baseVisit);
+    });
+
+    it('does not re-evaluate activities when only the name changes', async () => {
+      prisma.visit.findFirst.mockResolvedValue(baseVisit);
+
+      await service.update(userId, baseVisit.id, { name: 'Nuevo nombre' });
+
+      expect(viability.evaluateVisitActivities).not.toHaveBeenCalled();
     });
 
     it('re-queries the weather provider when latitude changes and updates weatherUpdate', async () => {
@@ -359,6 +402,14 @@ describe('VisitsService', () => {
       expect(prisma.visit.update).toHaveBeenCalledWith({
         where: { id: baseVisit.id },
         data: { status: VisitStatus.CANCELLED },
+      });
+      expect(prisma.activity.updateMany).toHaveBeenCalledWith({
+        where: {
+          visitId: baseVisit.id,
+          isActive: true,
+          state: { name: 'planned' },
+        },
+        data: { stateId: 3 },
       });
       expect(result.data.status).toBe(VisitStatus.CANCELLED);
     });
