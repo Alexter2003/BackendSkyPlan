@@ -18,6 +18,9 @@ const completeHourly = {
     relative_humidity_2m: Array.from({ length: 24 }, () => 70),
     precipitation: Array.from({ length: 24 }, () => 0),
     pressure_msl: Array.from({ length: 24 }, () => 1013),
+    cloud_cover: Array.from({ length: 24 }, () => 50),
+    weather_code: Array.from({ length: 24 }, () => 3),
+    wind_speed_10m: Array.from({ length: 24 }, () => 5),
   },
 };
 // Índice objetivo (mediodía) con valores distintos, para verificar que se
@@ -26,6 +29,9 @@ completeHourly.hourly.temperature_2m[12] = 22.4;
 completeHourly.hourly.relative_humidity_2m[12] = 71;
 completeHourly.hourly.precipitation[12] = 0.2;
 completeHourly.hourly.pressure_msl[12] = 1013.4;
+completeHourly.hourly.cloud_cover[12] = 85;
+completeHourly.hourly.weather_code[12] = 61;
+completeHourly.hourly.wind_speed_10m[12] = 12.5;
 
 describe('OpenMeteoService', () => {
   let service: OpenMeteoService;
@@ -58,6 +64,9 @@ describe('OpenMeteoService', () => {
       humidity: 71,
       precipitation: 0.2,
       atmosphericPressure: 1013.4,
+      cloudCover: 85,
+      weatherCode: 61,
+      windSpeed: 12.5,
     });
   });
 
@@ -127,6 +136,21 @@ describe('OpenMeteoService', () => {
     expect(result).toBeNull();
   });
 
+  it('requests cloud cover, weather code and wind speed from the provider', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(completeHourly));
+
+    await service.getSnapshot(
+      14.5586,
+      -90.7295,
+      new Date('2026-09-28T00:00:00Z'),
+    );
+
+    const calledUrl = fetchMock.mock.calls[0][0] as URL;
+    expect(calledUrl.searchParams.get('hourly')).toContain('cloud_cover');
+    expect(calledUrl.searchParams.get('hourly')).toContain('weather_code');
+    expect(calledUrl.searchParams.get('hourly')).toContain('wind_speed_10m');
+  });
+
   describe('getSnapshotRange', () => {
     const multiDayHourly = {
       hourly: {
@@ -135,6 +159,9 @@ describe('OpenMeteoService', () => {
         relative_humidity_2m: [71, 68, 74],
         precipitation: [0.2, 0, 1.1],
         pressure_msl: [1013.4, 1012.9, 1011.5],
+        cloud_cover: [85, 40, 10],
+        weather_code: [61, 2, 0],
+        wind_speed_10m: [12.5, 8, 31],
       },
     };
 
@@ -154,6 +181,9 @@ describe('OpenMeteoService', () => {
         humidity: 68,
         precipitation: 0,
         atmosphericPressure: 1012.9,
+        cloudCover: 40,
+        weatherCode: 2,
+        windSpeed: 8,
       });
     });
 
@@ -181,6 +211,9 @@ describe('OpenMeteoService', () => {
           relative_humidity_2m: [71, 68],
           precipitation: [0.2, 0],
           pressure_msl: [1013.4, 1012.9],
+          cloud_cover: [85, 40],
+          weather_code: [61, 2],
+          wind_speed_10m: [12.5, 8],
         },
       };
       fetchMock.mockResolvedValue(jsonResponse(partial));

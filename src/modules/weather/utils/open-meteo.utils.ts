@@ -7,6 +7,9 @@ export interface OpenMeteoHourlyResponse {
     relative_humidity_2m?: (number | null)[];
     precipitation?: (number | null)[];
     pressure_msl?: (number | null)[];
+    cloud_cover?: (number | null)[];
+    weather_code?: (number | null)[];
+    wind_speed_10m?: (number | null)[];
   };
 }
 
@@ -32,12 +35,18 @@ export function parseOpenMeteoRange(
     const humidity = hourly.relative_humidity_2m?.[index];
     const precipitation = hourly.precipitation?.[index];
     const atmosphericPressure = hourly.pressure_msl?.[index];
+    const cloudCover = hourly.cloud_cover?.[index];
+    const weatherCode = hourly.weather_code?.[index];
+    const windSpeed = hourly.wind_speed_10m?.[index];
 
     if (
       temperature == null ||
       humidity == null ||
       precipitation == null ||
-      atmosphericPressure == null
+      atmosphericPressure == null ||
+      cloudCover == null ||
+      weatherCode == null ||
+      windSpeed == null
     ) {
       return;
     }
@@ -47,6 +56,9 @@ export function parseOpenMeteoRange(
       humidity,
       precipitation,
       atmosphericPressure,
+      cloudCover,
+      weatherCode,
+      windSpeed,
     });
   });
 
