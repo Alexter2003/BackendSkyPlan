@@ -26,6 +26,7 @@ model User {
   passwordResets     PasswordReset[]
   emailConfirmations EmailConfirmation[]
   visits             Visit[]
+  notifications      Notification[]
 }
 
 model EmailConfirmation {
@@ -89,6 +90,9 @@ model Visit {
   precipitation       Float?
   humidity            Float?
   atmosphericPressure Float?
+  cloudCover          Float?
+  windSpeed           Float?
+  weatherCode         Int?
   weatherUpdate       DateTime?
   isActive            Boolean     @default(true)
   createdAt           DateTime    @default(now())
@@ -102,23 +106,57 @@ model Visit {
   @@index([status, date])
 }
 
+enum ActivityType {
+  OUTDOOR
+  INDOOR
+}
+
+enum NotificationType {
+  ACTIVITY_NOT_VIABLE
+  ACTIVITY_VIABLE_AGAIN
+}
+
 model Activity {
-  id          Int      @id @default(autoincrement())
-  visitId     Int
-  stateId     Int
-  name        String   @db.VarChar(255)
-  description String   @db.VarChar(255)
-  date        DateTime @db.Date
-  startTime   DateTime @db.Time
-  endTime     DateTime @db.Time
-  isActive    Boolean  @default(true)
+  id                 Int          @id @default(autoincrement())
+  visitId            Int
+  stateId            Int
+  name               String       @db.VarChar(255)
+  description        String       @db.VarChar(255)
+  type               ActivityType
+  startTime          DateTime     @db.Time
+  endTime            DateTime     @db.Time
+  isViable           Boolean?
+  viabilityCheckedAt DateTime?
+  completedAt        DateTime?
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   visit            Visit             @relation(fields: [visitId], references: [id], onDelete: Cascade)
   state            State             @relation(fields: [stateId], references: [id], onDelete: Restrict)
   activityWeathers ActivityWeather[]
+  notifications    Notification[]
 
   @@index([visitId])
   @@index([stateId])
+  @@index([visitId, isActive])
+}
+
+model Notification {
+  id         Int              @id @default(autoincrement())
+  userId     Int
+  activityId Int
+  type       NotificationType
+  title      String           @db.VarChar(255)
+  message    String           @db.VarChar(500)
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([activityId])
 }
 
 model WeatherCondition {
