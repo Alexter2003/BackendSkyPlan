@@ -62,10 +62,18 @@ null ──clima compatible──▶ true      (no se avisa: solo quedó validad
 null ──clima NO compatible▶ false    (aviso ACTIVITY_NOT_VIABLE)
 true ──clima cambia────────▶ false   (aviso ACTIVITY_NOT_VIABLE)
 false ─clima mejora────────▶ true    (aviso ACTIVITY_VIABLE_AGAIN)
+true/false ─la visita pierde su clima▶ null   (sin aviso; ver abajo)
 ```
 
 Si el valor no cambia entre revisiones no se manda ningún aviso. Las actividades `INDOOR`
 siempre son `true`.
+
+**`null` significa "todavía no se sabe".** Una actividad `OUTDOOR` está en `null` cuando la
+visita no tiene datos de clima: porque se creó con la fecha a más de 10 días, o porque el usuario
+movió la fecha de la visita más allá de esa ventana. En ese caso el valor anterior (`true` o
+`false`) **se descarta** y vuelve a `null`, porque describía otra fecha o ubicación. No se manda
+aviso: la app solo debe mostrar la actividad como "pendiente de validar". Cuando la fecha entre
+a la ventana de 10 días, se vuelve a evaluar.
 
 ---
 
@@ -126,7 +134,8 @@ actividades pendientes pasan de `null` a `true` o `false`.
 
 - **Editar la visita** (`PATCH /api/visits/:id`) cambiando fecha o ubicación: se vuelve a
   consultar el clima y se reevalúan sus actividades, con aviso si alguna cambia. Las actividades
-  se mueven con la visita (heredan la fecha).
+  se mueven con la visita (heredan la fecha). Si la nueva fecha queda a más de 10 días, la visita
+  se queda sin clima y sus actividades `OUTDOOR` `planned` vuelven a `isViable: null`.
 - **Editar una actividad** (`PATCH /api/activities/:id`) cambiando horario, tipo o condiciones:
   se repiten las validaciones 3 a 7. Cambiar solo nombre o descripción no revalida.
 

@@ -112,8 +112,23 @@ describe('ActivityViabilityService', () => {
     });
   });
 
-  it('never overwrites a known viability when the visit has no weather data', async () => {
-    prisma.activity.findMany.mockResolvedValue([activity(false)]);
+  it.each([true, false])(
+    'resets a known viability (%s) to pending when the visit has no weather data, without notifying',
+    async (previous) => {
+      prisma.activity.findMany.mockResolvedValue([activity(previous)]);
+
+      await service.evaluateVisitActivities(visitWith(noWeather));
+
+      expect(prisma.activity.update).toHaveBeenCalledWith({
+        where: { id: 5 },
+        data: { isViable: null, viabilityCheckedAt: null },
+      });
+      expect(notifications.notify).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not write when the viability is already pending and there is still no weather', async () => {
+    prisma.activity.findMany.mockResolvedValue([activity(null)]);
 
     await service.evaluateVisitActivities(visitWith(noWeather));
 

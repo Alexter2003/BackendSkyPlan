@@ -64,7 +64,7 @@ Para el recorrido completo (visita, actividades, clima y notificaciones) ver
 | `startTime` / `endTime` | string | `"HH:mm"`, hora local de la ubicación |
 | `type` | string | `"OUTDOOR"` (al aire libre) \| `"INDOOR"` (interior) |
 | `state` | object | `{id, name}`. `name`: `"planned"` \| `"completed"` \| `"cancelled"` — es el estado que decide el **usuario** (checklist) |
-| `isViable` | boolean \| null | lo calcula el **sistema** contra el clima. `null` = todavía no hay pronóstico para validarla |
+| `isViable` | boolean \| null | lo calcula el **sistema** contra el clima. `null` = todavía no se sabe: la visita no tiene pronóstico (fecha a más de 10 días). Puede volver a `null` si el usuario mueve la fecha de la visita fuera de esa ventana |
 | `viabilityCheckedAt` | string (ISO) \| null | última evaluación de `isViable` |
 | `completedAt` | string (ISO) \| null | cuándo se marcó como completada |
 | `weatherConditions` | array | condiciones climáticas elegidas, `{id, name}` |
@@ -76,6 +76,10 @@ Para el recorrido completo (visita, actividades, clima y notificaciones) ver
   deja de ser compatible pone `isViable: false` y avisa (ver `docs/api/notifications.md`); el
   usuario decide si la cancela. Si el clima mejora, vuelve a `true` sola.
 - Las actividades `INDOOR` siempre tienen `isViable: true`.
+- `isViable: null` es "pendiente de validar", no "viable" ni "no viable": la app debe mostrarlo
+  con un estado propio. Si una actividad `OUTDOOR` tenía `true` o `false` y la visita se queda sin
+  clima (se movió la fecha a más de 10 días), vuelve a `null` sin aviso, porque el valor anterior
+  ya no describe la nueva fecha.
 
 ### Cómo se evalúa el clima
 

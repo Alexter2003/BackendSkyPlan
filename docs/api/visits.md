@@ -106,6 +106,8 @@ pronóstico de Open-Meteo para esa fecha y ubicación:
 - Cuando el clima cambia, el backend también reevalúa las actividades al aire libre de la
   visita y, si alguna deja de ser viable (o vuelve a serlo), avisa por WebSocket y lo deja en
   `GET /api/notifications` — ver `docs/api/notifications.md`.
+- Si al editar la fecha la visita queda a más de 10 días, sus campos de clima pasan a `null`
+  y las actividades al aire libre de la visita vuelven a `isViable: null` (pendiente de validar).
 - Una falla temporal del proveedor de clima nunca borra un dato de clima que la visita ya
   tenía — en el peor caso, simplemente no se actualiza en esa corrida.
 
