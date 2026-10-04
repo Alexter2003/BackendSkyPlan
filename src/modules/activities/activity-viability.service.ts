@@ -19,10 +19,12 @@ import { ACTIVITY_STATE, resolveViability } from './utils/activities.utils.js';
  *   null  -> false  ACTIVITY_NOT_VIABLE
  *   false -> true   ACTIVITY_VIABLE_AGAIN
  *   sin cambio      no se hace nada, así el cron no genera avisos repetidos
+ *   true/false -> null  la visita perdió su clima (ej. la fecha se movió más
+ *                       allá de la ventana de pronóstico): vuelve a pendiente
+ *                       de validar, sin aviso. Un valor viejo no se conserva
+ *                       porque ya no describe la fecha/ubicación actual.
  *
- * Si la visita no tiene datos de clima completos no se toca nada: un dato
- * faltante nunca pisa una viabilidad ya conocida. Este servicio nunca cancela
- * una actividad; esa decisión es del usuario.
+ * Este servicio nunca cancela una actividad; esa decisión es del usuario.
  */
 @Injectable()
 export class ActivityViabilityService {
@@ -53,7 +55,15 @@ export class ActivityViabilityService {
         weather: visit,
       });
 
+      // Sin datos de clima no se sabe si es viable: vuelve a "pendiente de
+      // validar" (null), sin avisar, hasta que haya pronóstico otra vez.
       if (isViable === null) {
+        if (activity.isViable !== null) {
+          await this.prisma.activity.update({
+            where: { id: activity.id },
+            data: { isViable: null, viabilityCheckedAt: null },
+          });
+        }
         continue;
       }
 
