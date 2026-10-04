@@ -91,9 +91,13 @@ correctness there over polish elsewhere.
   requirement, not an optional nicety.
 - Create endpoint requires: target location, description, date, start/end time, **activity
   type (al aire libre / interior)**, and a list of desirable weather conditions
-  (`WeatherCondition` / `ActivityWeather` join model already exist for the conditions list —
-  confirm there is an actual `type` field for indoor/outdoor; as of this schema there isn't
-  one on `Activity` yet, which is a gap against 4.b, not a stylistic choice).
+  (`WeatherCondition` / `ActivityWeather` join model). `Activity.type` (`ActivityType`
+  enum: `OUTDOOR` / `INDOOR`) now exists — 4.b is covered.
+- **Weather rules** live in code, in one place: `src/modules/weather/constants/weather-conditions.constants.ts`
+  (catalog names, contradictory pairs, thresholds) and `utils/weather-conditions.utils.ts`
+  (pure functions). Contradictory selections are rejected with 400, and creating/editing an
+  `OUTDOOR` activity whose conditions don't match the visit's stored forecast is rejected with
+  422; no forecast yet leaves `isViable = null` (pending).
 - Edit endpoint for general activity data.
 - Delete endpoint for an activity.
 
@@ -127,6 +131,13 @@ graded requirement) and every other team standard.
   client ("los datos climáticos se cargarán cuando la fecha esté dentro de los próximos 10
   días") — it isn't graded directly, but it's load-bearing for the Actividades Pendientes
   feasibility indicator (5.e), which needs current weather to be meaningful.
+
+- **Activity viability + realtime alerts**: `Activity.isViable` is system-computed (separate
+  from the user's `State` checklist). The weather cron re-evaluates `OUTDOOR` `planned`
+  activities and `NotificationsModule` (socket.io gateway `/notifications` + `Notification`
+  table + `GET /api/notifications`) tells the Flutter app when one stops or resumes being
+  viable. It never auto-cancels an activity. Additive: it does not touch the graded 5.e
+  feasibility indicator, which still has to be built separately for pending activities.
 
 ## Adding something extra or innovative
 

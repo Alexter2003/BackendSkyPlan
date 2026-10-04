@@ -49,6 +49,9 @@ además agrega `activities`:
   "precipitation": 0.2,
   "humidity": 71,
   "atmosphericPressure": 1013.4,
+  "cloudCover": 85,
+  "windSpeed": 12.5,
+  "weatherCode": 61,
   "weatherUpdate": "2026-09-20T12:00:00.000Z",
   "createdAt": "2026-09-20T12:00:00.000Z"
 }
@@ -66,10 +69,13 @@ además agrega `activities`:
 | `precipitation` | number \| null | mm |
 | `humidity` | number \| null | % |
 | `atmosphericPressure` | number \| null | hPa |
+| `cloudCover` | number \| null | % de nubosidad |
+| `windSpeed` | number \| null | km/h |
+| `weatherCode` | number \| null | código WMO del clima (0 despejado, 51-57 llovizna, 61-67 lluvia, 71-77 nieve, etc.) |
 | `weatherUpdate` | string (ISO datetime) \| null | última vez que se consultó/actualizó el clima |
 | `createdAt` | string (ISO datetime) | |
 
-Los cinco campos de clima vienen todos `null` juntos cuando la fecha de la visita está a más
+Los ocho campos de clima (temperatura, precipitación, humedad, presión, nubosidad, viento, código y `weatherUpdate`) vienen todos `null` juntos cuando la fecha de la visita está a más
 de 10 días — ver la sección "Clima" más abajo.
 
 ### Estados (`status`)
@@ -90,13 +96,16 @@ visible en las listas con `status: "CANCELLED"`; eliminar la oculta por completo
 Al crear o editar una visita (cambiando fecha o coordenadas), el backend consulta el
 pronóstico de Open-Meteo para esa fecha y ubicación:
 
-- Si la fecha está dentro de los próximos 10 días, los 5 campos de clima se llenan de una vez.
+- Si la fecha está dentro de los próximos 10 días, los campos de clima se llenan de una vez.
 - Si está más allá de 10 días, quedan en `null` y el mensaje de la respuesta lo indica
   explícitamente (ver cada endpoint abajo). **No hace falta que el cliente vuelva a pedir el
-  clima**: una tarea programada en el backend revisa diariamente todas las visitas `PLANNED`
-  dentro de la ventana de 10 días y llena/actualiza sus 5 campos automáticamente a medida que
+  clima**: una tarea programada en el backend revisa cada 6 horas todas las visitas `PLANNED`
+  dentro de la ventana de 10 días y llena/actualiza sus campos de clima automáticamente a medida que
   la fecha se acerca. El cliente solo necesita volver a pedir la visita (`GET /:id` o
   `GET /`) para ver el clima actualizado; no hay ninguna acción que el cliente deba disparar.
+- Cuando el clima cambia, el backend también reevalúa las actividades al aire libre de la
+  visita y, si alguna deja de ser viable (o vuelve a serlo), avisa por WebSocket y lo deja en
+  `GET /api/notifications` — ver `docs/api/notifications.md`.
 - Una falla temporal del proveedor de clima nunca borra un dato de clima que la visita ya
   tenía — en el peor caso, simplemente no se actualiza en esa corrida.
 
@@ -203,8 +212,8 @@ Ninguno específico de este endpoint (más allá de `401` por falta de autentica
 
 ## 3. Ver detalle de una visita — `GET /api/visits/:id`
 
-Igual al objeto `Visit`, pero agrega su lista de actividades (ordenadas por fecha y hora de
-inicio).
+Igual al objeto `Visit`, pero agrega su lista de actividades (ordenadas por hora de inicio).
+Cada actividad tiene la misma forma que en `docs/api/activities.md`.
 
 ### Respuesta exitosa — `200 OK`
 
@@ -223,17 +232,26 @@ inicio).
     "precipitation": 0.2,
     "humidity": 71,
     "atmosphericPressure": 1013.4,
+    "cloudCover": 85,
+    "windSpeed": 12.5,
+    "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
     "createdAt": "2026-09-20T12:00:00.000Z",
     "activities": [
       {
         "id": 5,
+        "visitId": 10,
         "name": "Caminata",
         "description": "Cerro de la Cruz",
         "date": "2026-09-28",
         "startTime": "08:00",
         "endTime": "10:30",
-        "state": { "id": 1, "name": "planned" }
+        "type": "OUTDOOR",
+        "state": { "id": 1, "name": "planned" },
+        "isViable": true,
+        "viabilityCheckedAt": "2026-09-20T12:00:00.000Z",
+        "completedAt": null,
+        "weatherConditions": [{ "id": 3, "name": "cloudy" }]
       }
     ]
   }
@@ -242,7 +260,7 @@ inicio).
 
 `activities` solo incluye actividades activas (no eliminadas). Sin actividades → `[]`.
 `activity.state` es distinto de `visit.status`: es el estado de esa actividad puntual
-(`planned` / `confirmed` / `cancelled` / `completed`, en minúscula), no el de la visita.
+(`planned` / `completed` / `cancelled`, en minúscula), no el de la visita.
 
 ### Errores posibles
 
@@ -332,7 +350,7 @@ adelantado. Sin body.
 ## 6. Cancelar visita — `PATCH /api/visits/:id/cancel`
 
 Marca la visita como cancelada (`status: "CANCELLED"`) sin eliminarla — sigue apareciendo en
-`GET /api/visits`. A diferencia de finalizar, no importa la fecha: se puede cancelar una
+`GET /api/visits`. Sus actividades que sigan en `planned` pasan a `cancelled` con ella. A diferencia de finalizar, no importa la fecha: se puede cancelar una
 visita futura o pasada. Sin body.
 
 ### Respuesta exitosa — `200 OK`

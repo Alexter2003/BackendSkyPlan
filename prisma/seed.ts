@@ -1,16 +1,17 @@
 import { PrismaClient } from '@prisma/client';
+import {
+  WEATHER_CONDITION_DESCRIPTIONS,
+  WEATHER_CONDITION_NAMES,
+} from '../src/modules/weather/constants/weather-conditions.constants.js';
 
 const prisma = new PrismaClient();
 
 const STATES = ['planned', 'confirmed', 'cancelled', 'completed'];
 
-const WEATHER_CONDITIONS = [
-  { name: 'sunny', description: 'Clear sky with abundant sunshine' },
-  { name: 'rainy', description: 'Continuous rainfall' },
-  { name: 'cloudy', description: 'Overcast sky' },
-  { name: 'windy', description: 'Strong sustained wind' },
-  { name: 'snowy', description: 'Snowfall' },
-];
+const WEATHER_CONDITIONS = WEATHER_CONDITION_NAMES.map((name) => ({
+  name,
+  description: WEATHER_CONDITION_DESCRIPTIONS[name],
+}));
 
 async function main() {
   for (const name of STATES) {

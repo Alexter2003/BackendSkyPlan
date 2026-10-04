@@ -2,13 +2,20 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { ActivityViabilityService } from '../activities/activity-viability.service.js';
 import type { ServiceResponse } from '../../common/interfaces/service-response.interface.js';
 import { WEATHER_PORT } from '../weather/interfaces/weather-port.interface.js';
 import type { WeatherPort } from '../weather/interfaces/weather-port.interface.js';
+import {
+  ACTIVITY_INCLUDE,
+  ACTIVITY_STATE,
+  toActivityPublic,
+} from '../activities/utils/activities.utils.js';
 import type { CreateVisitDto } from './dto/create-visit.dto.js';
 import type { UpdateVisitDto } from './dto/update-visit.dto.js';
 import type {
@@ -36,6 +43,7 @@ export class VisitsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(WEATHER_PORT) private readonly weather: WeatherPort,
+    private readonly viability: ActivityViabilityService,
   ) {}
 
   async create(
@@ -94,8 +102,8 @@ export class VisitsService {
       include: {
         activities: {
           where: { isActive: true },
-          include: { state: true },
-          orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+          include: ACTIVITY_INCLUDE,
+          orderBy: { startTime: 'asc' },
         },
       },
     });
@@ -107,7 +115,12 @@ export class VisitsService {
     return {
       status: HttpStatus.OK,
       message: 'Ubicación obtenida exitosamente',
-      data: toVisitDetail(visit),
+      data: toVisitDetail(
+        visit,
+        visit.activities.map((activity) =>
+          toActivityPublic(activity, visit.date),
+        ),
+      ),
     };
   }
 
@@ -166,6 +179,12 @@ export class VisitsService {
       },
     });
 
+    // La fecha o ubicación cambió, así que el clima guardado es otro: las
+    // actividades se reevalúan y se avisa si alguna cambió de viabilidad.
+    if (dateChanged || locationChanged) {
+      await this.viability.evaluateVisitActivities(visit);
+    }
+
     return {
       status: HttpStatus.OK,
       message,
@@ -214,9 +233,29 @@ export class VisitsService {
 
     assertIsPlanned(existing);
 
-    const visit = await this.prisma.visit.update({
-      where: { id },
-      data: { status: VisitStatus.CANCELLED },
+    // Al cancelar la visita, sus actividades pendientes se cancelan con ella.
+    const cancelledState = await this.prisma.state.findUnique({
+      where: { name: ACTIVITY_STATE.CANCELLED },
+    });
+    if (!cancelledState) {
+      throw new InternalServerErrorException(
+        `El estado '${ACTIVITY_STATE.CANCELLED}' no está configurado`,
+      );
+    }
+
+    const visit = await this.prisma.$transaction(async (tx) => {
+      await tx.activity.updateMany({
+        where: {
+          visitId: id,
+          isActive: true,
+          state: { name: ACTIVITY_STATE.PLANNED },
+        },
+        data: { stateId: cancelledState.id },
+      });
+      return tx.visit.update({
+        where: { id },
+        data: { status: VisitStatus.CANCELLED },
+      });
     });
 
     return {

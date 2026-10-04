@@ -5,6 +5,7 @@ import {
   WEATHER_PORT,
   WeatherPort,
 } from '../../../src/modules/weather/interfaces/weather-port.interface.js';
+import { ActivityViabilityService } from '../../../src/modules/activities/activity-viability.service.js';
 import { VisitsWeatherCron } from '../../../src/modules/visits/visits-weather.cron.js';
 
 function decimal(value: number) {
@@ -31,12 +32,16 @@ describe('VisitsWeatherCron', () => {
   let cron: VisitsWeatherCron;
   let prisma: PrismaMock;
   let weather: WeatherPort;
+  let viability: { evaluateVisitActivities: ReturnType<typeof vi.fn> };
 
   const snapshot = {
     temperature: 22.4,
     humidity: 71,
     precipitation: 0.2,
     atmosphericPressure: 1013.4,
+    cloudCover: 85,
+    windSpeed: 12.5,
+    weatherCode: 61,
   };
 
   const visitA = {
@@ -60,6 +65,9 @@ describe('VisitsWeatherCron', () => {
     vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
 
     prisma = createPrismaMock();
+    viability = {
+      evaluateVisitActivities: vi.fn().mockResolvedValue(undefined),
+    };
     weather = {
       getSnapshot: vi.fn(),
       getSnapshotRange: vi.fn().mockResolvedValue(new Map()),
@@ -70,6 +78,7 @@ describe('VisitsWeatherCron', () => {
         VisitsWeatherCron,
         { provide: PrismaService, useValue: prisma },
         { provide: WEATHER_PORT, useValue: weather },
+        { provide: ActivityViabilityService, useValue: viability },
       ],
     }).compile();
 
@@ -116,7 +125,7 @@ describe('VisitsWeatherCron', () => {
     );
   });
 
-  it('writes the five weather fields for a visit whose date has a snapshot', async () => {
+  it('writes the weather fields for a visit whose date has a snapshot', async () => {
     prisma.visit.findMany.mockResolvedValue([visitA]);
     (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Map([['2026-09-25', snapshot]]),
@@ -131,9 +140,44 @@ describe('VisitsWeatherCron', () => {
         precipitation: snapshot.precipitation,
         humidity: snapshot.humidity,
         atmosphericPressure: snapshot.atmosphericPressure,
+        cloudCover: snapshot.cloudCover,
+        windSpeed: snapshot.windSpeed,
+        weatherCode: snapshot.weatherCode,
         weatherUpdate: expect.any(Date),
       },
     });
+  });
+
+  it('re-evaluates the activities of every visit it updates', async () => {
+    const updatedVisit = { id: visitA.id, userId: 1 };
+    prisma.visit.findMany.mockResolvedValue([visitA]);
+    prisma.visit.update.mockResolvedValue(updatedVisit);
+    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['2026-09-25', snapshot]]),
+    );
+
+    await cron.refreshUpcomingVisits();
+
+    expect(viability.evaluateVisitActivities).toHaveBeenCalledWith(
+      updatedVisit,
+    );
+  });
+
+  it('keeps going when re-evaluating activities fails for a visit', async () => {
+    prisma.visit.findMany.mockResolvedValue([visitA, visitB]);
+    prisma.visit.update.mockResolvedValue({ id: 1 });
+    viability.evaluateVisitActivities.mockRejectedValueOnce(new Error('boom'));
+    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([
+        ['2026-09-25', snapshot],
+        ['2026-09-26', snapshot],
+      ]),
+    );
+
+    await cron.refreshUpcomingVisits();
+
+    expect(prisma.visit.update).toHaveBeenCalledTimes(2);
+    expect(viability.evaluateVisitActivities).toHaveBeenCalledTimes(2);
   });
 
   it('never writes when no snapshot is available for that date, preserving prior data', async () => {

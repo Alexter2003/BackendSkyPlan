@@ -52,7 +52,7 @@ export class OpenMeteoService implements WeatherPort {
     url.searchParams.set('longitude', longitude.toString());
     url.searchParams.set(
       'hourly',
-      'temperature_2m,relative_humidity_2m,precipitation,pressure_msl',
+      'temperature_2m,relative_humidity_2m,precipitation,pressure_msl,cloud_cover,weather_code,wind_speed_10m',
     );
     url.searchParams.set('start_date', startParam);
     url.searchParams.set('end_date', endParam);

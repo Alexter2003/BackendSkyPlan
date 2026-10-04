@@ -3,6 +3,9 @@ export interface WeatherSnapshot {
   precipitation: number; // mm
   humidity: number; // %
   atmosphericPressure: number; // hPa
+  cloudCover: number; // %
+  windSpeed: number; // km/h
+  weatherCode: number; // código WMO
 }
 
 // Puerto que implementa cualquier proveedor de clima (Open-Meteo, Google
