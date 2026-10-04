@@ -150,6 +150,9 @@ pronóstico de Open-Meteo para esa fecha y ubicación:
     "precipitation": 0.2,
     "humidity": 71,
     "atmosphericPressure": 1013.4,
+    "cloudCover": 85,
+    "windSpeed": 12.5,
+    "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
     "createdAt": "2026-09-20T12:00:00.000Z"
   }
@@ -197,6 +200,9 @@ fecha ascendente. Incluye visitas en cualquier `status` (`PLANNED`, `COMPLETED`,
       "precipitation": 0.2,
       "humidity": 71,
       "atmosphericPressure": 1013.4,
+      "cloudCover": 85,
+      "windSpeed": 12.5,
+      "weatherCode": 61,
       "weatherUpdate": "2026-09-20T12:00:00.000Z",
       "createdAt": "2026-09-20T12:00:00.000Z"
     }
@@ -333,6 +339,9 @@ adelantado. Sin body.
     "precipitation": 0.2,
     "humidity": 71,
     "atmosphericPressure": 1013.4,
+    "cloudCover": 85,
+    "windSpeed": 12.5,
+    "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
     "createdAt": "2026-09-10T12:00:00.000Z"
   }
