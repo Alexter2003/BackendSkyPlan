@@ -41,24 +41,30 @@ git checkout -b feat/<short-description>
 1. Push the branch: `git push -u origin <branch-name>`
 2. Open the PR with `gh pr create`:
    - **Title**: follows [[commit-conventions]] format (`type(scope): subject`) — it becomes the squash-merge commit message.
-   - **Body**: use the template below.
+   - **Body**: use the template below, **written in Spanish** (project-local language rule, see
+     `CLAUDE.md`). The title stays in English because it becomes the squash-merge commit
+     message; commit messages are English too.
 3. Never merge your own PR immediately after opening it without at least a self-review pass (read the diff on GitHub, not just locally) unless the user explicitly says to merge now.
 
 ### PR body template
 
+Escrito en español (las secciones también):
+
 ```markdown
-## Summary
-- <1-3 bullets on what changed and why>
+## Resumen
+- <1-3 viñetas sobre qué cambió y por qué>
 
-## Changes
-- <notable files/areas touched, especially schema/migration/dependency changes>
+## Cambios
+- <archivos/áreas relevantes, sobre todo cambios de schema/migración/dependencias>
 
-## Test plan
-- [ ] <how this was verified — tests run, manual check, etc.>
+## Plan de pruebas
+- [ ] <cómo se verificó: pruebas ejecutadas, chequeo manual, etc.>
 
-## Notes for reviewers
-- <anything a reviewer should pay special attention to, e.g. a migration, a new dependency (see [[dependency-management]]), a breaking change>
+## Notas para quien revise
+- <lo que merece atención especial, ej. una migración, una dependencia nueva (ver [[dependency-management]]), un cambio que rompe contrato>
 ```
+
+If the PR closes an issue, end the body with `Closes #<n>` (keep that keyword in English: GitHub only recognizes it that way).
 
 ## Merging
 

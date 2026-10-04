@@ -27,8 +27,11 @@ left untouched, this is a project-local exception:
   messages thrown via `BadRequestException`/`ConflictException`/etc., `class-validator` DTO
   error messages) → **Spanish**.
 - **Code comments** → **Spanish**.
-- Everything else (identifiers, code itself, commit messages) → still **English**, per the
-  global rule — this override does not extend to those.
+- **Pull request descriptions** (the body: Resumen / Cambios / Plan de pruebas / Notas para
+  quien revise) → **Spanish**. The PR **title** stays in English Conventional Commits format,
+  because it becomes the squash-merge commit message.
+- Everything else (identifiers, code itself, commit messages, PR titles) → still **English**,
+  per the global rule — this override does not extend to those.
 
 ## Hard rules (summary — full detail lives in the skills above)
 
