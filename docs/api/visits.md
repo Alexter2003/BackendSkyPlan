@@ -159,7 +159,7 @@ pronóstico de Open-Meteo para esa fecha y ubicación:
 }
 ```
 
-Si la fecha está a más de 10 días, `data` trae los 5 campos de clima en `null` y `message` es
+Si la fecha está a más de 10 días, `data` trae los campos de clima (incluidos `cloudCover`, `windSpeed` y `weatherCode`) en `null` y `message` es
 en su lugar:
 
 ```
