@@ -33,6 +33,68 @@ completeHourly.hourly.cloud_cover[12] = 85;
 completeHourly.hourly.weather_code[12] = 61;
 completeHourly.hourly.wind_speed_10m[12] = 12.5;
 
+describe('OpenMeteoService.getForecastRange', () => {
+  const fetchMock = vi.fn();
+  let service: OpenMeteoService;
+
+  beforeEach(() => {
+    service = new OpenMeteoService();
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('asks for the precipitation probability in local time and returns snapshot plus hourly detail', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...completeHourly,
+        utc_offset_seconds: -21600,
+        hourly: {
+          ...completeHourly.hourly,
+          precipitation_probability: Array.from({ length: 24 }, () => 30),
+        },
+      }),
+    );
+
+    const result = await service.getForecastRange(
+      14.5586,
+      -90.7295,
+      new Date('2026-09-28T00:00:00Z'),
+      new Date('2026-09-28T00:00:00Z'),
+    );
+
+    const url = new URL(fetchMock.mock.calls[0][0] as URL);
+    expect(url.searchParams.get('hourly')).toContain(
+      'precipitation_probability',
+    );
+    expect(url.searchParams.get('timezone')).toBe('auto');
+
+    const day = result.get('2026-09-28');
+    expect(day?.snapshot?.weatherCode).toBe(61);
+    expect(day?.hourly?.utcOffsetSeconds).toBe(-21600);
+    expect(day?.hourly?.hours).toHaveLength(24);
+  });
+
+  it('returns an empty map when the provider fails', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+
+    const result = await service.getForecastRange(
+      14.5586,
+      -90.7295,
+      new Date('2026-09-28T00:00:00Z'),
+      new Date('2026-09-28T00:00:00Z'),
+    );
+
+    expect(result.size).toBe(0);
+  });
+});
+
 describe('OpenMeteoService', () => {
   let service: OpenMeteoService;
   const fetchMock = vi.fn();

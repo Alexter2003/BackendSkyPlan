@@ -5,9 +5,10 @@ import {
   REQUEST_TIMEOUT_MS,
   TARGET_HOUR,
 } from './constants/weather.constants.js';
-import { parseOpenMeteoRange } from './utils/open-meteo.utils.js';
+import { parseOpenMeteoForecast } from './utils/open-meteo.utils.js';
 import type { OpenMeteoHourlyResponse } from './utils/open-meteo.utils.js';
 import type {
+  DayForecast,
   WeatherPort,
   WeatherSnapshot,
 } from './interfaces/weather-port.interface.js';
@@ -36,6 +37,28 @@ export class OpenMeteoService implements WeatherPort {
     startDate: Date,
     endDate: Date,
   ): Promise<Map<string, WeatherSnapshot>> {
+    const forecasts = await this.getForecastRange(
+      latitude,
+      longitude,
+      startDate,
+      endDate,
+    );
+
+    const snapshots = new Map<string, WeatherSnapshot>();
+    for (const [date, forecast] of forecasts) {
+      if (forecast.snapshot) {
+        snapshots.set(date, forecast.snapshot);
+      }
+    }
+    return snapshots;
+  }
+
+  async getForecastRange(
+    latitude: number,
+    longitude: number,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<Map<string, DayForecast>> {
     const { today, maxDate } = this.getForecastBounds();
     const clippedStart = startDate < today ? today : startDate;
     const clippedEnd = endDate > maxDate ? maxDate : endDate;
@@ -52,7 +75,7 @@ export class OpenMeteoService implements WeatherPort {
     url.searchParams.set('longitude', longitude.toString());
     url.searchParams.set(
       'hourly',
-      'temperature_2m,relative_humidity_2m,precipitation,pressure_msl,cloud_cover,weather_code,wind_speed_10m',
+      'temperature_2m,relative_humidity_2m,precipitation,pressure_msl,cloud_cover,weather_code,wind_speed_10m,precipitation_probability',
     );
     url.searchParams.set('start_date', startParam);
     url.searchParams.set('end_date', endParam);
@@ -71,7 +94,7 @@ export class OpenMeteoService implements WeatherPort {
       }
 
       const raw = (await response.json()) as OpenMeteoHourlyResponse;
-      const snapshots = parseOpenMeteoRange(raw, TARGET_HOUR);
+      const snapshots = parseOpenMeteoForecast(raw, TARGET_HOUR);
 
       if (snapshots.size === 0) {
         this.logger.warn(

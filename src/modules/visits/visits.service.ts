@@ -9,6 +9,7 @@ import { VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { ActivityViabilityService } from '../activities/activity-viability.service.js';
 import type { ServiceResponse } from '../../common/interfaces/service-response.interface.js';
+import { getDayForecast } from '../weather/utils/day-forecast.utils.js';
 import { WEATHER_PORT } from '../weather/interfaces/weather-port.interface.js';
 import type { WeatherPort } from '../weather/interfaces/weather-port.interface.js';
 import {
@@ -22,13 +23,13 @@ import type {
   VisitDetail,
   VisitPublic,
 } from './interfaces/visit-public.interface.js';
-import type { VisitWeatherFields } from './utils/visits.utils.js';
+import type { VisitForecastFields } from './utils/visits.utils.js';
 import {
   assertDateHasArrived,
   assertIsPlanned,
   assertNoVisitOnDate,
   assertNotPastDate,
-  buildWeatherFields,
+  buildForecastFields,
   isSameDate,
   parseVisitDate,
   toVisitDetail,
@@ -54,7 +55,8 @@ export class VisitsService {
     assertNotPastDate(date);
     await assertNoVisitOnDate(this.prisma, userId, date);
 
-    const snapshot = await this.weather.getSnapshot(
+    const forecast = await getDayForecast(
+      this.weather,
       dto.latitude,
       dto.longitude,
       date,
@@ -67,13 +69,13 @@ export class VisitsService {
         latitude: dto.latitude,
         longitude: dto.longitude,
         date,
-        ...buildWeatherFields(snapshot),
+        ...buildForecastFields(forecast),
       },
     });
 
     return {
       status: HttpStatus.CREATED,
-      message: snapshot
+      message: forecast?.snapshot
         ? 'Ubicación registrada exitosamente'
         : WEATHER_PENDING_MESSAGE,
       data: toVisitPublic(visit),
@@ -150,20 +152,21 @@ export class VisitsService {
       await assertNoVisitOnDate(this.prisma, userId, nextDate, id);
     }
 
-    let weatherFields: VisitWeatherFields | Record<string, never> = {};
+    let weatherFields: VisitForecastFields | Record<string, never> = {};
     let message = 'Ubicación actualizada exitosamente';
 
     if (dateChanged || locationChanged) {
       const nextLatitude = dto.latitude ?? existing.latitude.toNumber();
       const nextLongitude = dto.longitude ?? existing.longitude.toNumber();
 
-      const snapshot = await this.weather.getSnapshot(
+      const forecast = await getDayForecast(
+        this.weather,
         nextLatitude,
         nextLongitude,
         nextDate,
       );
-      weatherFields = buildWeatherFields(snapshot);
-      if (!snapshot) {
+      weatherFields = buildForecastFields(forecast);
+      if (!forecast?.snapshot) {
         message = WEATHER_PENDING_MESSAGE;
       }
     }
@@ -250,7 +253,7 @@ export class VisitsService {
           isActive: true,
           state: { name: ACTIVITY_STATE.PLANNED },
         },
-        data: { stateId: cancelledState.id },
+        data: { stateId: cancelledState.id, cancelledAt: new Date() },
       });
       return tx.visit.update({
         where: { id },

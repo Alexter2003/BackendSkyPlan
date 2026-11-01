@@ -1,8 +1,11 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { Visit } from '@prisma/client';
-import { VisitStatus } from '@prisma/client';
+import { Prisma, VisitStatus } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { WeatherSnapshot } from '../../weather/interfaces/weather-port.interface.js';
+import type {
+  DayForecast,
+  WeatherSnapshot,
+} from '../../weather/interfaces/weather-port.interface.js';
 import type { ActivityPublic } from '../../activities/interfaces/activity-public.interface.js';
 import type {
   VisitDetail,
@@ -86,6 +89,24 @@ export function buildWeatherFields(
     windSpeed: snapshot.windSpeed,
     weatherCode: snapshot.weatherCode,
     weatherUpdate: new Date(),
+  };
+}
+
+export interface VisitForecastFields extends VisitWeatherFields {
+  hourlyForecast: Prisma.InputJsonValue | typeof Prisma.DbNull;
+}
+
+// Campos de clima de una visita: el snapshot de siempre más el pronóstico
+// horario. Sin pronóstico (o sin detalle horario) se limpian, porque un valor
+// viejo ya no describe la fecha/ubicación actual.
+export function buildForecastFields(
+  forecast: DayForecast | null,
+): VisitForecastFields {
+  return {
+    ...buildWeatherFields(forecast?.snapshot ?? null),
+    hourlyForecast: forecast?.hourly
+      ? (forecast.hourly as unknown as Prisma.InputJsonValue)
+      : Prisma.DbNull,
   };
 }
 
