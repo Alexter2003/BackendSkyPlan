@@ -32,6 +32,10 @@ usuario responde `404`, nunca `403`.
 Para el recorrido completo (visita, actividades, clima y notificaciones) ver
 `docs/api/activities-flow.md`.
 
+La pantalla de **pendientes** (listado de próximas con filtros, probabilidad de realización,
+cancelación automática, reactivar y reagendar) está documentada en
+`docs/api/pending-activities.md`.
+
 ---
 
 ## El objeto `Activity`
@@ -49,7 +53,11 @@ Para el recorrido completo (visita, actividades, clima y notificaciones) ver
   "state": { "id": 1, "name": "planned" },
   "isViable": true,
   "viabilityCheckedAt": "2026-10-04T12:00:00.000Z",
+  "probability": 80,
+  "probabilityBand": "GREEN",
   "completedAt": null,
+  "cancelReason": null,
+  "cancelledAt": null,
   "weatherConditions": [{ "id": 1, "name": "sunny" }]
 }
 ```
@@ -63,23 +71,40 @@ Para el recorrido completo (visita, actividades, clima y notificaciones) ver
 | `date` | string | `"YYYY-MM-DD"`. **No es editable**: es siempre la fecha de la visita |
 | `startTime` / `endTime` | string | `"HH:mm"`, hora local de la ubicación |
 | `type` | string | `"OUTDOOR"` (al aire libre) \| `"INDOOR"` (interior) |
-| `state` | object | `{id, name}`. `name`: `"planned"` \| `"completed"` \| `"cancelled"` — es el estado que decide el **usuario** (checklist) |
+| `state` | object | `{id, name}`. `name`: `"planned"` \| `"completed"` \| `"cancelled"` (cancelada por el usuario) \| `"cancelled_by_system"` (cancelada automáticamente por el clima, ver "Cancelación automática") |
 | `isViable` | boolean \| null | lo calcula el **sistema** contra el clima. `null` = todavía no se sabe: la visita no tiene pronóstico (fecha a más de 10 días). Puede volver a `null` si el usuario mueve la fecha de la visita fuera de esa ventana |
 | `viabilityCheckedAt` | string (ISO) \| null | última evaluación de `isViable` |
+| `probability` | number \| null | 0–100. **Idoneidad** del clima para la franja de la actividad (no es una probabilidad meteorológica). `null` = todavía no hay pronóstico horario (ver "Probabilidad de realización") |
+| `probabilityBand` | string \| null | semáforo para pintar la probabilidad: `"GREEN"` (70 o más) \| `"YELLOW"` (40–69) \| `"RED"` (menos de 40). `null` si `probability` es `null` |
 | `completedAt` | string (ISO) \| null | cuándo se marcó como completada |
+| `cancelReason` | string \| null | solo si está cancelada: el motivo que escribió el usuario (opcional) o, si fue el sistema, la explicación con la probabilidad y el pronóstico |
+| `cancelledAt` | string (ISO) \| null | cuándo se canceló. Vuelve a `null` si se reactiva o se reagenda |
 | `weatherConditions` | array | condiciones climáticas elegidas, `{id, name}` |
 
 ### `state` vs `isViable`
 
-- `state` es el checklist del usuario. Solo cambia con `complete` / `cancel`.
-- `isViable` es del sistema. El backend nunca cancela una actividad por sí solo: si el clima
-  deja de ser compatible pone `isViable: false` y avisa (ver `docs/api/notifications.md`); el
-  usuario decide si la cancela. Si el clima mejora, vuelve a `true` sola.
+- `state` es el checklist del usuario. Cambia con `complete` / `cancel` / `reactivate` /
+  `reschedule`, y el sistema solo lo cambia en un caso: la cancelación automática de la última
+  hora (ver abajo).
+- `isViable` es del sistema. Si el clima deja de ser compatible pone `isViable: false` y avisa
+  (ver `docs/api/notifications.md`); el usuario decide qué hacer. Si el clima mejora, vuelve a
+  `true` sola.
 - Las actividades `INDOOR` siempre tienen `isViable: true`.
 - `isViable: null` es "pendiente de validar", no "viable" ni "no viable": la app debe mostrarlo
   con un estado propio. Si una actividad `OUTDOOR` tenía `true` o `false` y la visita se queda sin
   clima (se movió la fecha a más de 10 días), vuelve a `null` sin aviso, porque el valor anterior
   ya no describe la nueva fecha.
+
+### Probabilidad de realización y cancelación automática
+
+`probability` (0–100) y `probabilityBand` son la idoneidad del clima para la franja exacta de la
+actividad, y el estado `cancelled_by_system` es el de una actividad que el sistema canceló en la
+última hora por mal clima (siempre reversible). La fórmula, el detalle de la cancelación
+automática y los endpoints relacionados están en `docs/api/pending-activities.md`.
+
+`isViable` y `probability` pueden diferir un poco: `isViable` usa el clima de las 12:00 de la
+visita (el que bloquea crear una actividad incompatible) y `probability` usa las horas de la
+actividad.
 
 ### Cómo se evalúa el clima
 
@@ -273,15 +298,22 @@ Sin body. Marca la actividad como `completed` y guarda `completedAt`.
 
 ## 6. Cancelar actividad (checklist) — `PATCH /api/activities/:id/cancel`
 
-Sin body. El usuario decide que ya no la va a realizar; se puede hacer en cualquier momento
-mientras siga `planned` (por ejemplo, tras el aviso de que dejó de ser viable).
+El usuario decide que ya no la va a realizar; se puede hacer en cualquier momento mientras siga
+`planned` (por ejemplo, tras el aviso de que dejó de ser viable). Body opcional:
+
+```json
+{ "reason": "Me enfermé" }
+```
+
+`reason`: opcional, 1 a 500 caracteres. Sin body también es válido.
 
 `200 OK`, `message`: `"Actividad cancelada exitosamente"`, `data`: el `Activity` con
-`state.name: "cancelled"`.
+`state.name: "cancelled"`, `cancelledAt` y `cancelReason` (`null` si no se envió).
 
 | Status | Cuándo | `message` |
 |---|---|---|
-| 400 | Ya está completada o cancelada | `"La actividad ya fue completada"` / `"La actividad está cancelada"` |
+| 400 | `reason` vacío o de más de 500 caracteres | mensaje de validación |
+| 400 | Ya está completada o cancelada (también `cancelled_by_system`) | `"La actividad ya fue completada"` / `"La actividad está cancelada"` |
 | 404 | No existe o no es del usuario | `"Actividad no encontrada"` |
 
 ---
@@ -298,6 +330,16 @@ Soft-delete: deja de aparecer en el listado y el detalle. No se puede deshacer d
 
 ---
 
+## 8. Reactivar, reagendar y actividades próximas
+
+Documentados en `docs/api/pending-activities.md`:
+
+- `PATCH /api/activities/:id/reactivate` — revierte una cancelación.
+- `PATCH /api/activities/:id/reschedule` — mueve la actividad a otra fecha y horario.
+- `GET /api/activities/upcoming` — listado cruzado de próximas, con filtros y paginación.
+
+---
+
 ## Flujo recomendado para el cliente (Flutter)
 
 1. Al abrir el formulario de actividad: `GET /api/weather-conditions` y deshabilitar en la UI
@@ -311,3 +353,9 @@ Soft-delete: deja de aparecer en el listado y el detalle. No se puede deshacer d
 5. Mantener un socket abierto (ver `docs/api/notifications.md`) para enterarte cuando una
    actividad deja de ser viable o vuelve a serlo, y refrescar la lista al recibirlo.
 6. Cancelar una visita cancela sus actividades `planned`; finalizarla no cambia las actividades.
+7. Pantalla de pendientes: `GET /api/activities/upcoming` con los filtros elegidos; refrescar al
+   entrar y con pull-to-refresh. Pinta `probabilityBand` como semáforo y distingue `state.name`
+   (`planned`, `completed`, `cancelled`, `cancelled_by_system`).
+8. Una actividad `cancelled_by_system` debe ofrecer **Reactivar** (con confirmación en la app si
+   el clima sigue malo) y **Reagendar**.
+9. Escuchar también `ACTIVITY_AUTO_CANCELLED` en el socket (ver `docs/api/notifications.md`).

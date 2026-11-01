@@ -20,8 +20,13 @@ o cuando se edita la fecha/ubicación de la visita):
 | `null` -> `true` | ninguno (solo quedó validada) |
 | sin cambio | ninguno (no hay avisos repetidos) |
 
-El backend **nunca cancela** la actividad: solo avisa. Solo se evalúan actividades `OUTDOOR`
-en estado `planned`.
+Estos dos avisos solo informan: no cancelan nada. Solo se evalúan actividades `OUTDOOR` en
+estado `planned`.
+
+Hay un tercer aviso, `ACTIVITY_AUTO_CANCELLED`, que sí acompaña un cambio de estado: cuando falta
+1 hora o menos para la actividad y su probabilidad de realización es menor a 30, el sistema la
+cancela (`state.name: "cancelled_by_system"`) y avisa. El usuario puede revertirlo con
+`PATCH /api/activities/:id/reactivate` o `/reschedule` (ver `docs/api/activities.md`).
 
 ---
 
@@ -34,6 +39,24 @@ en estado `planned`.
 - El servidor mete la conexión en una sala privada del usuario; solo recibe sus propios avisos.
 
 ### Evento `activity.viability_changed`
+
+Se usa el mismo evento para los tres tipos de aviso. Ejemplo de cancelación automática:
+
+```json
+{
+  "notificationId": 12,
+  "activityId": 5,
+  "visitId": 10,
+  "activityName": "Caminata",
+  "type": "ACTIVITY_AUTO_CANCELLED",
+  "isViable": false,
+  "title": "Actividad cancelada automáticamente",
+  "message": "La actividad 'Caminata' se canceló automáticamente porque el pronóstico del clima es desfavorable. Puedes reactivarla o reagendarla",
+  "createdAt": "2026-11-02T20:30:00.000Z"
+}
+```
+
+Ejemplo de aviso de viabilidad:
 
 ```json
 {
@@ -54,8 +77,8 @@ en estado `planned`.
 | `notificationId` | number | id en `GET /api/notifications` (para marcarla leída) |
 | `activityId` / `visitId` | number | para navegar a la actividad |
 | `activityName` | string | |
-| `type` | string | `"ACTIVITY_NOT_VIABLE"` \| `"ACTIVITY_VIABLE_AGAIN"` |
-| `isViable` | boolean | estado actual de la actividad |
+| `type` | string | `"ACTIVITY_NOT_VIABLE"` \| `"ACTIVITY_VIABLE_AGAIN"` \| `"ACTIVITY_AUTO_CANCELLED"` |
+| `isViable` | boolean | `true` solo en `ACTIVITY_VIABLE_AGAIN`; en `ACTIVITY_NOT_VIABLE` y `ACTIVITY_AUTO_CANCELLED` es `false`. Para saber si quedó cancelada usa `type` |
 | `title` / `message` | string | en español, listos para la notificación local |
 | `createdAt` | string (ISO) | |
 
@@ -137,5 +160,6 @@ Todos requieren `Authorization: Bearer <token>` y devuelven el sobre estándar
 1. Tras el login, abrir el socket con el token y escuchar `activity.viability_changed`.
 2. Al abrir la app (o volver a primer plano), llamar `GET /api/notifications?unread=true` y
    mostrar lo que llegó mientras estaba cerrada.
-3. Al abrir una notificación, `PATCH /:id/read` y navegar a `visitId`/`activityId`.
+3. Al abrir una notificación, `PATCH /:id/read` y navegar a `visitId`/`activityId`. Con
+   `ACTIVITY_AUTO_CANCELLED` ofrece **Reactivar** y **Reagendar**.
 4. En el logout, desconectar el socket.
