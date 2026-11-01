@@ -88,4 +88,54 @@ describe('ResendMailService', () => {
       'invalid API key',
     );
   });
+
+  describe('sendTemporaryPasswordEmail', () => {
+    const temporaryPayload = {
+      to: 'test@skyplan.dev',
+      username: 'testuser',
+      temporaryPassword: 'Tmp9xKq2LmWz',
+      expiresInMinutes: 30,
+    };
+
+    it('sends to the recipient with the temporary password in html and text', async () => {
+      sendMock.mockResolvedValue({ data: { id: 'email_2' }, error: null });
+      const service = createService({ RESEND_API_KEY: 're_test' });
+
+      await service.sendTemporaryPasswordEmail(temporaryPayload);
+
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: temporaryPayload.to,
+          html: expect.stringContaining(temporaryPayload.temporaryPassword),
+          text: expect.stringContaining(temporaryPayload.temporaryPassword),
+        }),
+      );
+    });
+
+    it('includes the expiration time in the email body', async () => {
+      sendMock.mockResolvedValue({ data: { id: 'email_2' }, error: null });
+      const service = createService({ RESEND_API_KEY: 're_test' });
+
+      await service.sendTemporaryPasswordEmail(temporaryPayload);
+
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          html: expect.stringContaining('30 minutes'),
+          text: expect.stringContaining('30 minutes'),
+        }),
+      );
+    });
+
+    it('throws when the Resend SDK returns an error', async () => {
+      sendMock.mockResolvedValue({
+        data: null,
+        error: { message: 'domain not verified' },
+      });
+      const service = createService({ RESEND_API_KEY: 're_test' });
+
+      await expect(
+        service.sendTemporaryPasswordEmail(temporaryPayload),
+      ).rejects.toThrow('domain not verified');
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../../src/prisma/prisma.service.js';
 import { SessionGuard } from '../../../src/common/guards/session.guard.js';
 import { Public } from '../../../src/common/decorators/public.decorator.js';
+import { AllowPendingPasswordChange } from '../../../src/common/decorators/allow-pending-password-change.decorator.js';
 import { hashSessionToken } from '../../../src/common/utils/session-token.utils.js';
 
 type PrismaMock = {
@@ -22,6 +23,9 @@ class DummyController {
   publicRoute(): void {}
 
   protectedRoute(): void {}
+
+  @AllowPendingPasswordChange()
+  allowedWhilePendingRoute(): void {}
 }
 
 function createContext(request: {
@@ -50,6 +54,8 @@ describe('SessionGuard', () => {
     id: 1,
     email: 'test@skyplan.dev',
     username: 'testuser',
+    firstName: null,
+    lastName: null,
     passwordHash: 'hashed',
     emailConfirmed: true,
     isActive: true,
@@ -180,6 +186,72 @@ describe('SessionGuard', () => {
     expect(prisma.session.update).toHaveBeenCalledWith({
       where: { id: baseSession.id },
       data: { lastUsedAt: now },
+    });
+  });
+
+  describe('with a pending password change', () => {
+    const pendingSession = {
+      ...baseSession,
+      user: {
+        ...baseUser,
+        mustChangePassword: true,
+        tempPasswordExpiresAt: new Date(now.getTime() + 60 * 1000),
+      },
+    };
+
+    it('blocks a protected route without the decorator with 403', async () => {
+      prisma.session.findUnique.mockResolvedValue(pendingSession);
+      const { context, request } = createContext({
+        headers: { authorization: 'Bearer valid-token' },
+      });
+
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(request.user).toBeUndefined();
+    });
+
+    it('blocks with the message asking to change the password', async () => {
+      prisma.session.findUnique.mockResolvedValue(pendingSession);
+      const { context } = createContext({
+        headers: { authorization: 'Bearer valid-token' },
+      });
+
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        'Debes cambiar tu contraseña antes de continuar',
+      );
+    });
+
+    it('allows a route marked with @AllowPendingPasswordChange', async () => {
+      prisma.session.findUnique.mockResolvedValue(pendingSession);
+      const { context, request } = createContext({
+        headers: { authorization: 'Bearer valid-token' },
+      });
+      vi.spyOn(context, 'getHandler').mockReturnValue(
+        DummyController.prototype.allowedWhilePendingRoute,
+      );
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(request.user).toMatchObject({ id: baseUser.id });
+    });
+
+    it('keeps public routes public', async () => {
+      const { context } = createContext({ headers: {} });
+      vi.spyOn(context, 'getHandler').mockReturnValue(
+        DummyController.prototype.publicRoute,
+      );
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+      expect(prisma.session.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('does not block a user without a pending change', async () => {
+      prisma.session.findUnique.mockResolvedValue(baseSession);
+      const { context } = createContext({
+        headers: { authorization: 'Bearer valid-token' },
+      });
+
+      await expect(guard.canActivate(context)).resolves.toBe(true);
     });
   });
 });

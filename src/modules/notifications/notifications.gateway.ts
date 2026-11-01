@@ -34,6 +34,17 @@ export class NotificationsGateway implements OnGatewayConnection {
 
     try {
       const { user } = await resolveSession(this.prisma, token);
+
+      // Con una contraseña temporal pendiente no se abre el canal: no hay
+      // decorador por ruta en WebSocket, así que se rechaza siempre.
+      if (user.mustChangePassword) {
+        this.logger.debug(
+          'Conexión WebSocket rechazada: cambio de contraseña pendiente',
+        );
+        client.disconnect(true);
+        return;
+      }
+
       await client.join(userRoom(user.id));
     } catch {
       this.logger.debug('Conexión WebSocket rechazada: sesión inválida');

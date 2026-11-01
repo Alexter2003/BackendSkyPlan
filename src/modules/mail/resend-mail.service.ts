@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 import { buildConfirmationEmail } from './templates/confirmation-email.template.js';
+import { buildTemporaryPasswordEmail } from './templates/temporary-password-email.template.js';
 import type {
   ConfirmationEmail,
   MailPort,
+  TemporaryPasswordEmail,
 } from './interfaces/mail-port.interface.js';
 
 const DEFAULT_MAIL_FROM = 'SkyPlan <no-reply@skyplan.alexvyumes-dev.com>';
@@ -37,6 +39,30 @@ export class ResendMailService implements MailPort {
     if (error) {
       throw new Error(
         `Resend failed to send confirmation email: ${error.message}`,
+      );
+    }
+  }
+
+  async sendTemporaryPasswordEmail(
+    payload: TemporaryPasswordEmail,
+  ): Promise<void> {
+    const { subject, html, text } = buildTemporaryPasswordEmail(
+      payload.username,
+      payload.temporaryPassword,
+      payload.expiresInMinutes,
+    );
+
+    const { error } = await this.resend.emails.send({
+      from: this.from,
+      to: payload.to,
+      subject,
+      html,
+      text,
+    });
+
+    if (error) {
+      throw new Error(
+        `Resend failed to send temporary password email: ${error.message}`,
       );
     }
   }

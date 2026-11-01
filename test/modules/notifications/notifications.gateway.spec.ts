@@ -44,6 +44,19 @@ describe('NotificationsGateway', () => {
     expect(client.disconnect).not.toHaveBeenCalled();
   });
 
+  it('disconnects without joining when a password change is pending', async () => {
+    prisma.session.findUnique.mockResolvedValue({
+      ...validSession,
+      user: { ...validSession.user, mustChangePassword: true },
+    });
+    const client = createClient('abc');
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, '', 42])(
     'disconnects when the token is %s',
     async (token) => {
