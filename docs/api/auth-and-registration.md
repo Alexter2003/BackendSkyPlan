@@ -53,13 +53,16 @@ Crea la cuenta y dispara el correo con el código de confirmación (no confirma 
     "id": 1,
     "email": "user@example.com",
     "username": "user123",
+    "firstName": null,
+    "lastName": null,
     "emailConfirmed": false,
     "createdAt": "2026-09-18T02:00:00.000Z"
   }
 }
 ```
 
-`data` nunca incluye el password ni el código de confirmación.
+`data` nunca incluye el password ni el código de confirmación. `firstName` y `lastName` son
+`null` hasta que el usuario los defina con `PUT /api/users/me` (ver `user-management.md`).
 
 ### Errores posibles
 
@@ -100,6 +103,8 @@ máximo **5 intentos fallidos**.
     "id": 1,
     "email": "user@example.com",
     "username": "user123",
+    "firstName": null,
+    "lastName": null,
     "emailConfirmed": true,
     "createdAt": "2026-09-18T02:00:00.000Z"
   }
@@ -189,6 +194,8 @@ por username.
       "id": 1,
       "email": "user@example.com",
       "username": "user123",
+      "firstName": null,
+      "lastName": null,
       "emailConfirmed": true,
       "createdAt": "2026-09-18T02:00:00.000Z"
     }
@@ -203,7 +210,10 @@ por username.
   expira por inactividad antes de eso si no se usa.
 - `mustChangePassword`: si es `true`, la app debe forzar la pantalla de cambio de contraseña
   antes de permitir cualquier otra acción (típico tras una contraseña temporal asignada por
-  recuperación de cuenta — flujo aún no implementado en este backend).
+  `POST /api/auth/forgot-password`). El backend lo hace cumplir: con ese flag, toda ruta
+  protegida responde `403` salvo `PUT /api/auth/change-password`, `POST /api/auth/logout` y
+  `GET /api/users/me`. Detalle completo en `user-management.md`. El login **no** valida la
+  expiración de la temporal: eso lo rechaza `change-password`.
 
 ### Errores posibles
 
@@ -237,7 +247,8 @@ Sin body.
 ```
 
 Es idempotente: llamarlo dos veces con el mismo token, o con un token ya vencido, sigue
-respondiendo `200`.
+respondiendo `200`. También funciona con un cambio de contraseña pendiente (`mustChangePassword`
+en `true`), para que el usuario pueda salir.
 
 ### Errores posibles
 
@@ -253,7 +264,7 @@ respondiendo `200`.
 2. `POST /api/users/confirm-email` con el código que el usuario ingresa.
    - Si expira o no llega, ofrecer botón "reenviar código" → `POST /api/users/resend-confirmation`.
 3. `POST /api/auth/login` una vez confirmado el correo → guardar `token` y `expiresAt`.
-   - Si `mustChangePassword` es `true`, forzar cambio de contraseña antes de continuar
-     (endpoint de cambio de password aún pendiente de implementar).
+   - Si `mustChangePassword` es `true`, forzar cambio de contraseña antes de continuar con
+     `PUT /api/auth/change-password` (ver `user-management.md`).
 4. Enviar `Authorization: Bearer <token>` en cada request subsecuente.
 5. `POST /api/auth/logout` al cerrar sesión.

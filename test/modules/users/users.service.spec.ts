@@ -73,6 +73,8 @@ describe('UsersService', () => {
     id: 1,
     email: input.email,
     username: input.username,
+    firstName: null,
+    lastName: null,
     passwordHash: 'hashed',
     emailConfirmed: false,
     mustChangePassword: false,
@@ -92,7 +94,10 @@ describe('UsersService', () => {
       usedAt: null,
       attempts: 0,
     });
-    mail = { sendConfirmationEmail: vi.fn().mockResolvedValue(undefined) };
+    mail = {
+      sendConfirmationEmail: vi.fn().mockResolvedValue(undefined),
+      sendTemporaryPasswordEmail: vi.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -149,6 +154,8 @@ describe('UsersService', () => {
         id: createdUser.id,
         email: createdUser.email,
         username: createdUser.username,
+        firstName: null,
+        lastName: null,
         emailConfirmed: createdUser.emailConfirmed,
         createdAt: createdUser.createdAt,
       });
@@ -321,6 +328,94 @@ describe('UsersService', () => {
       await expect(service.resendConfirmation(dto)).rejects.toThrow(
         ConflictException,
       );
+    });
+  });
+
+  describe('profile', () => {
+    const { passwordHash: _hash, ...authUser } = {
+      ...createdUser,
+      emailConfirmed: true,
+      isActive: true,
+      passwordHash: '',
+    };
+
+    describe('getProfile', () => {
+      it('returns the profile with null names and the pending-change flag', () => {
+        const result = service.getProfile(authUser);
+
+        expect(result.status).toBe(HttpStatus.OK);
+        expect(result.data).toEqual({
+          id: authUser.id,
+          email: authUser.email,
+          username: authUser.username,
+          firstName: null,
+          lastName: null,
+          emailConfirmed: true,
+          createdAt: authUser.createdAt,
+          mustChangePassword: false,
+        });
+      });
+
+      it('never exposes passwordHash', () => {
+        const result = service.getProfile(authUser);
+
+        expect(result.data).not.toHaveProperty('passwordHash');
+      });
+
+      it('reports mustChangePassword when a change is pending', () => {
+        const result = service.getProfile({
+          ...authUser,
+          mustChangePassword: true,
+        });
+
+        expect(result.data.mustChangePassword).toBe(true);
+      });
+    });
+
+    describe('updateProfile', () => {
+      it('updates both names and returns the updated profile', async () => {
+        prisma.user.update.mockResolvedValue({
+          ...createdUser,
+          firstName: 'Ana',
+          lastName: 'García',
+        });
+
+        const result = await service.updateProfile(authUser, {
+          firstName: 'Ana',
+          lastName: 'García',
+        });
+
+        expect(prisma.user.update).toHaveBeenCalledWith({
+          where: { id: authUser.id },
+          data: { firstName: 'Ana', lastName: 'García' },
+        });
+        expect(result.data).toMatchObject({
+          firstName: 'Ana',
+          lastName: 'García',
+        });
+        expect(result.data).not.toHaveProperty('passwordHash');
+      });
+
+      it('writes only the field sent so the other one is kept', async () => {
+        prisma.user.update.mockResolvedValue({
+          ...createdUser,
+          firstName: 'Ana',
+        });
+
+        await service.updateProfile(authUser, { firstName: 'Ana' });
+
+        expect(prisma.user.update).toHaveBeenCalledWith({
+          where: { id: authUser.id },
+          data: { firstName: 'Ana' },
+        });
+      });
+
+      it('rejects with 400 when no editable field is sent', async () => {
+        await expect(service.updateProfile(authUser, {})).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(prisma.user.update).not.toHaveBeenCalled();
+      });
     });
   });
 });
