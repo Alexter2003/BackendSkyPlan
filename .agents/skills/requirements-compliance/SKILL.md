@@ -114,6 +114,22 @@ correctness there over polish elsewhere.
   forecast weather vs. the activity's desired `WeatherCondition` list — this is graded output,
   not a display detail, so it must come from the API, not be computed ad-hoc in Flutter.
 
+**Status (change `activities-smart-update`, openspec):** all five obligations above are
+implemented in the backend.
+- Upcoming list with each activity's location and hourly forecast of its slot, plus filters
+  (`days`, `visitId`, `probabilityMin/Max`, `state`), sorting and pagination:
+  `GET /api/activities/upcoming`.
+- Probability (`probability` 0–100 + `probabilityBand`) comes from the API, computed from the
+  activity type + the desired conditions + the hourly forecast of its time slot.
+- Complete: `PATCH /:id/complete`. Manual cancel (optional reason): `PATCH /:id/cancel`.
+- Reschedule date and time with the module 4 validations re-run (overlap `409`, forecast `422`):
+  `PATCH /:id/reschedule`.
+- Automatic "by system" cancellation is distinguishable in the stored state
+  (`cancelled_by_system`) and audited (`cancelReason`, `cancelledAt`). It runs as a periodic job
+  (every 15 min), only within the last hour before the activity and with probability < 30; the
+  user can always undo it (`PATCH /:id/reactivate`). The job-vs-on-demand decision is documented
+  in `docs/api/activities.md`.
+
 ## Team-adopted scope (beyond the graded checklist)
 
 These are not in the official brief, but the team has adopted them as committed project scope —

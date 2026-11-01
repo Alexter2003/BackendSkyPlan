@@ -78,6 +78,11 @@ además agrega `activities`:
 Los ocho campos de clima (temperatura, precipitación, humedad, presión, nubosidad, viento, código y `weatherUpdate`) vienen todos `null` juntos cuando la fecha de la visita está a más
 de 10 días — ver la sección "Clima" más abajo.
 
+El backend además guarda el pronóstico **hora por hora** del día de la visita (para calcular la
+probabilidad de cada actividad), pero **no forma parte del objeto `Visit`**: el clima de la franja
+de cada actividad llega en `forecast` de `GET /api/activities/upcoming` (ver
+`docs/api/activities.md`).
+
 ### Estados (`status`)
 
 | Valor | Significado | Cómo se llega |

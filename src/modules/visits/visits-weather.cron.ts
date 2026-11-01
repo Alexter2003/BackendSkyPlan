@@ -8,7 +8,7 @@ import { WEATHER_PORT } from '../weather/interfaces/weather-port.interface.js';
 import type { WeatherPort } from '../weather/interfaces/weather-port.interface.js';
 import {
   addUtcDays,
-  buildWeatherFields,
+  buildForecastFields,
   formatVisitDate,
   startOfUtcDay,
 } from './utils/visits.utils.js';
@@ -93,7 +93,7 @@ export class VisitsWeatherCron {
             const minDate = new Date(Math.min(...groupTimestamps));
             const maxGroupDate = new Date(Math.max(...groupTimestamps));
 
-            const snapshots = await this.weather.getSnapshotRange(
+            const forecasts = await this.weather.getForecastRange(
               group.latitude,
               group.longitude,
               minDate,
@@ -101,15 +101,15 @@ export class VisitsWeatherCron {
             );
 
             for (const visit of group.visits) {
-              const snapshot = snapshots.get(formatVisitDate(visit.date));
-              if (!snapshot) {
+              const forecast = forecasts.get(formatVisitDate(visit.date));
+              if (!forecast?.snapshot) {
                 skipped += 1;
                 continue;
               }
 
               const updatedVisit = await this.prisma.visit.update({
                 where: { id: visit.id },
-                data: buildWeatherFields(snapshot),
+                data: buildForecastFields(forecast),
               });
               updated += 1;
 

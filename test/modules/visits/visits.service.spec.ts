@@ -5,7 +5,7 @@ import {
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
-import { VisitStatus } from '@prisma/client';
+import { Prisma, VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../../src/prisma/prisma.service.js';
 import {
   WEATHER_PORT,
@@ -80,6 +80,20 @@ describe('VisitsService', () => {
     weatherCode: 61,
   };
 
+  const hourly = {
+    utcOffsetSeconds: -21600,
+    hours: [
+      {
+        time: '2026-09-28T15:00',
+        weatherCode: 1,
+        precipitation: 0,
+        cloudCover: 20,
+        windSpeed: 10,
+        precipitationProbability: 5,
+      },
+    ],
+  };
+
   const baseVisit = {
     id: 10,
     userId,
@@ -124,6 +138,13 @@ describe('VisitsService', () => {
     weather = {
       getSnapshot: vi.fn().mockResolvedValue(snapshot),
       getSnapshotRange: vi.fn().mockResolvedValue(new Map()),
+      getForecastRange: vi
+        .fn()
+        .mockImplementation((_lat: number, _lng: number, start: Date) =>
+          Promise.resolve(
+            new Map([[start.toISOString().slice(0, 10), { snapshot, hourly }]]),
+          ),
+        ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -150,18 +171,22 @@ describe('VisitsService', () => {
       expect(data.userId).toBe(userId);
       expect(data.temperature).toBe(snapshot.temperature);
       expect(data.weatherUpdate).toBeInstanceOf(Date);
+      expect(data.hourlyForecast).toEqual(hourly);
       expect(result.status).toBe(HttpStatus.CREATED);
       expect(result.message).toBe('Ubicación registrada exitosamente');
     });
 
     it('persists the visit with null weather fields and a pending-weather message when the date is out of range', async () => {
-      (weather.getSnapshot as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+        new Map(),
+      );
 
       const result = await service.create(userId, createDto);
 
       const data = prisma.visit.create.mock.calls[0][0].data;
       expect(data.temperature).toBeNull();
       expect(data.weatherUpdate).toBeNull();
+      expect(data.hourlyForecast).toBe(Prisma.DbNull);
       expect(result.message).toContain('se cargarán cuando');
     });
 
@@ -256,7 +281,7 @@ describe('VisitsService', () => {
 
       await service.update(userId, baseVisit.id, { name: 'Nuevo nombre' });
 
-      expect(weather.getSnapshot).not.toHaveBeenCalled();
+      expect(weather.getForecastRange).not.toHaveBeenCalled();
       const data = prisma.visit.update.mock.calls[0][0].data;
       expect(data).not.toHaveProperty('temperature');
     });
@@ -283,9 +308,10 @@ describe('VisitsService', () => {
       const dto: UpdateVisitDto = { latitude: 15.0 };
       await service.update(userId, baseVisit.id, dto);
 
-      expect(weather.getSnapshot).toHaveBeenCalledWith(
+      expect(weather.getForecastRange).toHaveBeenCalledWith(
         15.0,
         baseVisit.longitude.toNumber(),
+        baseVisit.date,
         baseVisit.date,
       );
       const data = prisma.visit.update.mock.calls[0][0].data;
@@ -299,7 +325,7 @@ describe('VisitsService', () => {
 
       await service.update(userId, baseVisit.id, { date: '2026-09-29' });
 
-      expect(weather.getSnapshot).toHaveBeenCalledTimes(1);
+      expect(weather.getForecastRange).toHaveBeenCalledTimes(1);
       const data = prisma.visit.update.mock.calls[0][0].data;
       expect(data.date).toEqual(new Date('2026-09-29T00:00:00Z'));
     });
@@ -409,7 +435,7 @@ describe('VisitsService', () => {
           isActive: true,
           state: { name: 'planned' },
         },
-        data: { stateId: 3 },
+        data: { stateId: 3, cancelledAt: new Date('2026-09-20T12:00:00Z') },
       });
       expect(result.data.status).toBe(VisitStatus.CANCELLED);
     });

@@ -40,6 +40,27 @@ describe('NotificationsService', () => {
   describe('notify', () => {
     const activity = { id: 5, visitId: 10, name: 'Caminata' };
 
+    it('saves and emits an auto-cancellation notice as not viable', async () => {
+      await service.notify(
+        1,
+        activity,
+        NotificationType.ACTIVITY_AUTO_CANCELLED,
+      );
+
+      expect(prisma.notification.create.mock.calls[0][0].data).toMatchObject({
+        type: NotificationType.ACTIVITY_AUTO_CANCELLED,
+        title: 'Actividad cancelada automáticamente',
+      });
+      expect(gateway.emitToUser).toHaveBeenCalledWith(
+        1,
+        'activity.viability_changed',
+        expect.objectContaining({
+          type: NotificationType.ACTIVITY_AUTO_CANCELLED,
+          isViable: false,
+        }),
+      );
+    });
+
     it("persists the notification and emits it to the owner's room", async () => {
       await service.notify(1, activity, NotificationType.ACTIVITY_NOT_VIABLE);
 

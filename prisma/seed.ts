@@ -6,7 +6,13 @@ import {
 
 const prisma = new PrismaClient();
 
-const STATES = ['planned', 'confirmed', 'cancelled', 'completed'];
+const STATES = [
+  'planned',
+  'confirmed',
+  'cancelled',
+  'cancelled_by_system',
+  'completed',
+];
 
 const WEATHER_CONDITIONS = WEATHER_CONDITION_NAMES.map((name) => ({
   name,

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { VisitStatus } from '@prisma/client';
+import { Prisma, VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../../src/prisma/prisma.service.js';
 import {
   WEATHER_PORT,
@@ -70,7 +70,8 @@ describe('VisitsWeatherCron', () => {
     };
     weather = {
       getSnapshot: vi.fn(),
-      getSnapshotRange: vi.fn().mockResolvedValue(new Map()),
+      getSnapshotRange: vi.fn(),
+      getForecastRange: vi.fn().mockResolvedValue(new Map()),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -107,17 +108,17 @@ describe('VisitsWeatherCron', () => {
 
   it('groups visits at the same rounded coordinate into a single provider call', async () => {
     prisma.visit.findMany.mockResolvedValue([visitA, visitB]);
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Map([
-        ['2026-09-25', snapshot],
-        ['2026-09-26', snapshot],
+        ['2026-09-25', { snapshot, hourly: null }],
+        ['2026-09-26', { snapshot, hourly: null }],
       ]),
     );
 
     await cron.refreshUpcomingVisits();
 
-    expect(weather.getSnapshotRange).toHaveBeenCalledTimes(1);
-    expect(weather.getSnapshotRange).toHaveBeenCalledWith(
+    expect(weather.getForecastRange).toHaveBeenCalledTimes(1);
+    expect(weather.getForecastRange).toHaveBeenCalledWith(
       14.5586,
       -90.7295,
       visitA.date,
@@ -127,8 +128,8 @@ describe('VisitsWeatherCron', () => {
 
   it('writes the weather fields for a visit whose date has a snapshot', async () => {
     prisma.visit.findMany.mockResolvedValue([visitA]);
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
-      new Map([['2026-09-25', snapshot]]),
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['2026-09-25', { snapshot, hourly: null }]]),
     );
 
     await cron.refreshUpcomingVisits();
@@ -144,16 +145,43 @@ describe('VisitsWeatherCron', () => {
         windSpeed: snapshot.windSpeed,
         weatherCode: snapshot.weatherCode,
         weatherUpdate: expect.any(Date),
+        hourlyForecast: Prisma.DbNull,
       },
     });
+  });
+
+  it('stores the hourly forecast next to the snapshot when the provider returns it', async () => {
+    const hourly = {
+      utcOffsetSeconds: -21600,
+      hours: [
+        {
+          time: '2026-09-25T15:00',
+          weatherCode: 1,
+          precipitation: 0,
+          cloudCover: 10,
+          windSpeed: 8,
+          precipitationProbability: 5,
+        },
+      ],
+    };
+    prisma.visit.findMany.mockResolvedValue([visitA]);
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['2026-09-25', { snapshot, hourly }]]),
+    );
+
+    await cron.refreshUpcomingVisits();
+
+    expect(prisma.visit.update.mock.calls[0][0].data.hourlyForecast).toEqual(
+      hourly,
+    );
   });
 
   it('re-evaluates the activities of every visit it updates', async () => {
     const updatedVisit = { id: visitA.id, userId: 1 };
     prisma.visit.findMany.mockResolvedValue([visitA]);
     prisma.visit.update.mockResolvedValue(updatedVisit);
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
-      new Map([['2026-09-25', snapshot]]),
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['2026-09-25', { snapshot, hourly: null }]]),
     );
 
     await cron.refreshUpcomingVisits();
@@ -167,10 +195,10 @@ describe('VisitsWeatherCron', () => {
     prisma.visit.findMany.mockResolvedValue([visitA, visitB]);
     prisma.visit.update.mockResolvedValue({ id: 1 });
     viability.evaluateVisitActivities.mockRejectedValueOnce(new Error('boom'));
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Map([
-        ['2026-09-25', snapshot],
-        ['2026-09-26', snapshot],
+        ['2026-09-25', { snapshot, hourly: null }],
+        ['2026-09-26', { snapshot, hourly: null }],
       ]),
     );
 
@@ -182,7 +210,7 @@ describe('VisitsWeatherCron', () => {
 
   it('never writes when no snapshot is available for that date, preserving prior data', async () => {
     prisma.visit.findMany.mockResolvedValue([visitA]);
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Map(),
     );
 
@@ -200,12 +228,12 @@ describe('VisitsWeatherCron', () => {
     };
     prisma.visit.findMany.mockResolvedValue([visitA, visitC]);
 
-    (weather.getSnapshotRange as ReturnType<typeof vi.fn>).mockImplementation(
+    (weather.getForecastRange as ReturnType<typeof vi.fn>).mockImplementation(
       async (latitude: number) => {
         if (latitude === 14.5586) {
           throw new Error('Open-Meteo unreachable');
         }
-        return new Map([['2026-09-27', snapshot]]);
+        return new Map([['2026-09-27', { snapshot, hourly: null }]]);
       },
     );
 

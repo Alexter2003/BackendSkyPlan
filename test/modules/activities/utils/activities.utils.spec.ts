@@ -110,7 +110,7 @@ describe('assertNoOverlap', () => {
       where: {
         visitId: 7,
         isActive: true,
-        state: { name: { not: 'cancelled' } },
+        state: { name: { notIn: ['cancelled', 'cancelled_by_system'] } },
         startTime: { lt: t('11:00') },
         endTime: { gt: t('09:00') },
       },

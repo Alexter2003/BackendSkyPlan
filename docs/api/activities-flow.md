@@ -23,12 +23,17 @@ Todos los endpoints requieren `Authorization: Bearer <token>` y devuelven el sob
 - **Condiciones deseadas**: una o más del catálogo (`sunny`, `clear`, `partly_cloudy`, `cloudy`,
   `drizzle`, `rainy`, `snowy`, `windy`). Deben cumplirse **todas** (Y).
 - **Dos estados distintos en una actividad:**
-  - `state` (`planned` / `completed` / `cancelled`): lo decide **el usuario**.
+  - `state` (`planned` / `completed` / `cancelled` / `cancelled_by_system`): lo decide **el
+    usuario**, con una única excepción (la cancelación automática de la última hora).
   - `isViable` (`true` / `false` / `null`): lo calcula **el sistema** según el clima. `null` =
     todavía no hay pronóstico.
+- **`probability`** (0–100) y **`probabilityBand`** (`GREEN` / `YELLOW` / `RED`): qué tan bien
+  encaja el clima de la franja exacta de la actividad con lo que el usuario pidió. Es el indicador
+  que se muestra; ver `docs/api/activities.md`.
 
-El sistema **nunca cancela** una actividad: solo la marca `isViable: false` y avisa. El usuario
-decide si la cancela.
+El sistema **avisa** cuando una actividad deja de ser viable y no la cancela, salvo en la última
+hora: si falta 1 hora o menos para que empiece y su probabilidad es menor a 30, la cancela como
+`cancelled_by_system` y avisa. Siempre se puede revertir (reactivar o reagendar).
 
 ---
 
@@ -48,12 +53,17 @@ Una visita `COMPLETED` o `CANCELLED` ya no se puede editar ni recibe actividades
 ### Actividad (checklist)
 
 ```
-planned ──complete──▶ completed   (solo si la fecha de su visita ya llegó)
-   │
-   └─────cancel────▶ cancelled    (en cualquier momento)
+planned ──complete──▶ completed             (solo si la fecha de su visita ya llegó)
+   │  ▲
+   │  ├──reactivate / reschedule──┐
+   │  │                           │
+   ├──cancel──────────▶ cancelled │         (usuario, en cualquier momento)
+   └──auto (<= 1 h, probabilidad < 30)▶ cancelled_by_system
 ```
 
-Una actividad `completed` o `cancelled` queda congelada: no se edita ni cambia de estado.
+Una actividad `completed` queda congelada. Una `cancelled` o `cancelled_by_system` no se edita,
+pero se puede **reactivar** (`PATCH /:id/reactivate`) o **reagendar** (`PATCH /:id/reschedule`),
+que la devuelve a `planned`.
 
 ### Viabilidad (`isViable`) — solo actividades `OUTDOOR` en `planned`
 
@@ -123,12 +133,22 @@ Para cada visita `PLANNED` dentro de los próximos 10 días:
 Una visita que estaba a más de 10 días y entra en la ventana recibe su clima ahí; sus
 actividades pendientes pasan de `null` a `true` o `false`.
 
+### 4b. La última hora: cancelación automática
+
+Otro proceso corre **cada 15 minutos**. Para las actividades `OUTDOOR` en `planned` que empiezan
+en 60 minutos o menos (hora local de la ubicación), vuelve a pedir el pronóstico y recalcula la
+probabilidad. Si es menor a 30, cancela la actividad: `state.name: "cancelled_by_system"`,
+`cancelledAt` y `cancelReason` (con la probabilidad y el pronóstico), y manda
+`ACTIVITY_AUTO_CANCELLED`. No cancela si no consiguió pronóstico, y no vuelve a cancelar una
+actividad que el usuario reactivó.
+
 ### 5. La app se entera
 
 - App abierta: llega `activity.viability_changed` por el socket (`docs/api/notifications.md`).
 - App cerrada: al abrir, `GET /api/notifications?unread=true`.
 - Con cualquiera de los dos, la app muestra la notificación local y marca la actividad con
   alerta. Para saber cuáles marcar: `isViable === false` y `state.name === 'planned'`.
+- Si el aviso es `ACTIVITY_AUTO_CANCELLED`, ofrece **Reactivar** o **Reagendar**.
 
 ### 6. Editar
 
@@ -143,7 +163,29 @@ actividades pendientes pasan de `null` a `true` o `false`.
 
 Por cada actividad:
 - `PATCH /api/activities/:id/complete`: la hizo. Solo desde el día de la visita; guarda `completedAt`.
-- `PATCH /api/activities/:id/cancel`: ya no la va a hacer (por ejemplo, tras el aviso de mal clima).
+- `PATCH /api/activities/:id/cancel`: ya no la va a hacer (por ejemplo, tras el aviso de mal
+  clima). Acepta un `reason` opcional.
+
+### 7b. Se canceló por lluvia: reactivar o reagendar
+
+(Detalle de request y respuestas en `docs/api/pending-activities.md`.)
+
+Una actividad `cancelled_by_system` (o `cancelled`) se puede recuperar:
+
+- `PATCH /api/activities/:id/reactivate`: sigue el mismo día y horario. No se rechaza por el
+  clima (la app confirma con el usuario si el pronóstico sigue malo); solo falla si el horario ya
+  lo ocupó otra actividad o si ya terminó. El sistema no la volverá a cancelar.
+- `PATCH /api/activities/:id/reschedule` con `{ date, startTime, endTime }`: la mueve a otro día.
+  Se revalida cruce de horario y que el pronóstico de ese día sea compatible (`409`/`422` si no).
+  Si el usuario no tiene visita ese día, el backend la crea con el mismo lugar.
+
+### 7c. Pantalla de pendientes
+
+(Detalle de request y respuestas en `docs/api/pending-activities.md`.)
+
+`GET /api/activities/upcoming` lista las actividades de todas las ubicaciones, con el clima
+proyectado de cada una, `probability`/`probabilityBand`, `state`, y filtros por proximidad
+(`days`), ubicación (`visitId`), probabilidad (`probabilityMin`/`probabilityMax`) y estado.
 
 ### 8. Cerrar la visita
 
@@ -163,13 +205,18 @@ Una visita `COMPLETED` o `CANCELLED` deja de revisarse en las corridas de clima.
 |---|---|---|
 | `400` | validación de campos, rango de horas, condiciones contradictorias, estados congelados | mostrar `message` |
 | `404` | visita o actividad inexistente o de otro usuario | volver a la lista |
-| `409` | horario cruzado con otra actividad | mostrar `message` (nombra la actividad y su horario) |
+| `409` | horario cruzado con otra actividad; al reagendar, ya hay una visita ese día en otro lugar | mostrar `message` (nombra la actividad y su horario) |
 | `422` | el pronóstico no permite la actividad al aire libre | mostrar `message` tal cual; sugerir cambiar condiciones, tipo u horario |
 
 ## Limitaciones conocidas
 
-- El clima de la visita es un único dato por día (el de las 12:00); todas las actividades de ese
-  día se evalúan contra el mismo.
+- `isViable` y la validación al crear/editar usan el clima de las 12:00 de la visita; la
+  `probability` usa el pronóstico de las horas de cada actividad. Pueden diferir un poco.
+- La cancelación automática depende de que el proveedor de clima responda; sin pronóstico no
+  cancela.
+- Una visita solo puede existir una por fecha: reagendar a un día que ya tiene una visita en
+  otro lugar responde `409`.
 - El WebSocket no es un push del sistema operativo: solo llega con la app abierta o activa en
   segundo plano. Lo perdido se recupera con `GET /api/notifications`.
-- No hay endpoint que filtre "solo actividades no viables"; el cliente filtra por `isViable`.
+- Para "solo actividades con mala probabilidad" usa `GET /api/activities/upcoming` con
+  `probabilityMax` o filtra por `probabilityBand === "RED"`.

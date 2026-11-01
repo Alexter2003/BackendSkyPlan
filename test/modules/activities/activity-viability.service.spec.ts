@@ -19,20 +19,48 @@ const noWeather = {
   weatherCode: null,
 };
 
-function visitWith(weather: object): Visit {
-  return { id: 10, userId: 1, ...weather } as unknown as Visit;
+function visitWith(weather: object, hourlyForecast: unknown = null): Visit {
+  return {
+    id: 10,
+    userId: 1,
+    date: new Date('2026-11-02T00:00:00Z'),
+    hourlyForecast,
+    ...weather,
+  } as unknown as Visit;
 }
 
-function activity(isViable: boolean | null, conditionName = 'sunny') {
+function activity(
+  isViable: boolean | null,
+  conditionName = 'sunny',
+  overrides: object = {},
+) {
   return {
     id: 5,
     visitId: 10,
     name: 'Caminata',
     type: ActivityType.OUTDOOR,
     isViable,
+    probability: null,
+    startTime: new Date('1970-01-01T15:00:00Z'),
+    endTime: new Date('1970-01-01T16:00:00Z'),
     activityWeathers: [{ weatherCondition: { id: 1, name: conditionName } }],
+    ...overrides,
   };
 }
+
+const hourlyForecast = {
+  utcOffsetSeconds: -21600,
+  hours: [
+    {
+      time: '2026-11-02T15:00',
+      weatherCode: 0,
+      precipitation: 0,
+      cloudCover: 5,
+      windSpeed: 5,
+      precipitationProbability: 20,
+    },
+  ],
+};
 
 describe('ActivityViabilityService', () => {
   let service: ActivityViabilityService;
@@ -61,13 +89,12 @@ describe('ActivityViabilityService', () => {
     service = module.get(ActivityViabilityService);
   });
 
-  it('only loads active, planned OUTDOOR activities of the visit', async () => {
+  it('only loads active, planned activities of the visit', async () => {
     await service.evaluateVisitActivities(visitWith(sunny));
 
     expect(prisma.activity.findMany.mock.calls[0][0].where).toEqual({
       visitId: 10,
       isActive: true,
-      type: ActivityType.OUTDOOR,
       state: { name: 'planned' },
     });
   });
@@ -108,7 +135,11 @@ describe('ActivityViabilityService', () => {
 
     expect(prisma.activity.update).toHaveBeenCalledWith({
       where: { id: 5 },
-      data: { isViable: false, viabilityCheckedAt: expect.any(Date) },
+      data: {
+        isViable: false,
+        viabilityCheckedAt: expect.any(Date),
+        probability: null,
+      },
     });
   });
 
@@ -121,7 +152,7 @@ describe('ActivityViabilityService', () => {
 
       expect(prisma.activity.update).toHaveBeenCalledWith({
         where: { id: 5 },
-        data: { isViable: null, viabilityCheckedAt: null },
+        data: { isViable: null, viabilityCheckedAt: null, probability: null },
       });
       expect(notifications.notify).not.toHaveBeenCalled();
     },
@@ -134,6 +165,38 @@ describe('ActivityViabilityService', () => {
 
     expect(prisma.activity.update).not.toHaveBeenCalled();
     expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('persists the probability computed from the hourly forecast', async () => {
+    prisma.activity.findMany.mockResolvedValue([activity(true)]);
+
+    await service.evaluateVisitActivities(visitWith(sunny, hourlyForecast));
+
+    expect(prisma.activity.update.mock.calls[0][0].data.probability).toBe(80);
+  });
+
+  it('only refreshes the probability of INDOOR activities, never notifying', async () => {
+    prisma.activity.findMany.mockResolvedValue([
+      activity(true, 'sunny', { type: ActivityType.INDOOR }),
+    ]);
+
+    await service.evaluateVisitActivities(visitWith(rainy, hourlyForecast));
+
+    expect(prisma.activity.update).toHaveBeenCalledWith({
+      where: { id: 5 },
+      data: { probability: 100 },
+    });
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('does not write an INDOOR activity whose probability did not change', async () => {
+    prisma.activity.findMany.mockResolvedValue([
+      activity(true, 'sunny', { type: ActivityType.INDOOR, probability: 100 }),
+    ]);
+
+    await service.evaluateVisitActivities(visitWith(rainy, hourlyForecast));
+
+    expect(prisma.activity.update).not.toHaveBeenCalled();
   });
 
   it('never cancels an activity', async () => {
