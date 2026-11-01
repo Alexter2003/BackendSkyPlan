@@ -94,6 +94,7 @@ model Visit {
   windSpeed           Float?
   weatherCode         Int?
   weatherUpdate       DateTime?
+  hourlyForecast      Json?
   isActive            Boolean     @default(true)
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
@@ -114,6 +115,7 @@ enum ActivityType {
 enum NotificationType {
   ACTIVITY_NOT_VIABLE
   ACTIVITY_VIABLE_AGAIN
+  ACTIVITY_AUTO_CANCELLED
 }
 
 model Activity {
@@ -127,7 +129,11 @@ model Activity {
   endTime            DateTime     @db.Time
   isViable           Boolean?
   viabilityCheckedAt DateTime?
+  probability        Int?
   completedAt        DateTime?
+  cancelReason       String?      @db.VarChar(500)
+  cancelledAt        DateTime?
+  reactivatedAt      DateTime?
   isActive           Boolean      @default(true)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
