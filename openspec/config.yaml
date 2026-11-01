@@ -1,0 +1,32 @@
+schema: spec-driven
+
+context: |
+  Language: Spanish
+  All artifacts must be written in Spanish.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  Project: BackendSkyPlan — NestJS API (TypeScript strict, no `any`) that suggests activities
+  based on location, date and weather forecast. Prisma + PostgreSQL (Supabase), custom auth
+  (User/Session/PasswordReset), Open-Meteo as weather provider, @nestjs/schedule for crons,
+  Socket.IO for realtime notifications.
+
+  Locked choices: Prisma (no other ORM), class-validator DTOs, oxlint, vitest, pnpm only.
+  No @map/@@map in schema.prisma. Every schema change needs a committed Prisma migration.
+  Feature-based layout: src/modules/<feature>/ (controller = HTTP only, service = logic).
+  Before adding a dependency, check DEPENDENCIES.md and update it in the same change.
+  Git: never commit to main; branch -> PR -> squash-merge; Conventional Commits in English.
+
+  Language split: API response messages, exception messages, DTO validation messages and
+  code comments are in Spanish. Identifiers, commit messages and PR titles are in English.
+
+  Grading context: Activities (30%) and Pending Activities (30%) modules weigh the most.
+  See .agents/skills/requirements-compliance/SKILL.md before closing a module.
+
+rules:
+  proposal:
+    - State what is out of scope
+    - Link the related GitHub issue / project item
+  design:
+    - Document technical decisions with 2-3 options, pros/cons and a recommendation
+  tasks:
+    - Split into small tasks; include tests (vitest) and client docs under docs/api/ when endpoints change
