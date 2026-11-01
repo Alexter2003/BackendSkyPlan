@@ -15,6 +15,13 @@ import { ActivityType as ActivityTypeEnum } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
 import { WEATHER_CONDITION_LABELS } from '../../weather/constants/weather-conditions.constants.js';
 import type { WeatherConditionName } from '../../weather/constants/weather-conditions.constants.js';
+import type { HourlyForecastHour } from '../../weather/interfaces/hourly-forecast.interface.js';
+import { parseHourlyForecast } from '../../weather/utils/hourly-forecast.utils.js';
+import {
+  computeProbability,
+  minutesOfDay,
+  toProbabilityBand,
+} from './activity-probability.utils.js';
 import {
   evaluateConditions,
   findConflicts,
@@ -31,7 +38,19 @@ export const ACTIVITY_STATE = {
   PLANNED: 'planned',
   COMPLETED: 'completed',
   CANCELLED: 'cancelled',
+  CANCELLED_BY_SYSTEM: 'cancelled_by_system',
 } as const;
+
+// Única fuente de verdad de "está cancelada": cubre la cancelación manual y la
+// hecha por el sistema. No comparar contra ACTIVITY_STATE.CANCELLED a mano.
+export const CANCELLED_STATE_NAMES: readonly string[] = [
+  ACTIVITY_STATE.CANCELLED,
+  ACTIVITY_STATE.CANCELLED_BY_SYSTEM,
+];
+
+export function isCancelled(stateName: string): boolean {
+  return CANCELLED_STATE_NAMES.includes(stateName);
+}
 
 export const ACTIVITY_INCLUDE = {
   state: true,
@@ -65,7 +84,11 @@ export function toActivityPublic(
     state: { id: activity.state.id, name: activity.state.name },
     isViable: activity.isViable,
     viabilityCheckedAt: activity.viabilityCheckedAt,
+    probability: activity.probability,
+    probabilityBand: toProbabilityBand(activity.probability),
     completedAt: activity.completedAt,
+    cancelReason: activity.cancelReason,
+    cancelledAt: activity.cancelledAt,
     weatherConditions: activity.activityWeathers.map((link) => ({
       id: link.weatherCondition.id,
       name: link.weatherCondition.name,
@@ -111,7 +134,7 @@ export async function assertNoOverlap(
     where: {
       visitId,
       isActive: true,
-      state: { name: { not: ACTIVITY_STATE.CANCELLED } },
+      state: { name: { notIn: [...CANCELLED_STATE_NAMES] } },
       startTime: { lt: end },
       endTime: { gt: start },
       ...(excludeId !== undefined ? { id: { not: excludeId } } : {}),
@@ -207,4 +230,97 @@ export function assertForecastCompatible(
   }
 
   return isViable;
+}
+
+interface ProbabilityVisitSource {
+  date: Date;
+  hourlyForecast: unknown;
+}
+
+/**
+ * Probabilidad de realización de una actividad con el pronóstico horario que
+ * guarda su visita. Es el único punto por el que pasan creación, edición,
+ * reactivación, reagendado y los crons, para que el valor sea siempre el mismo.
+ */
+export function computeActivityProbability(input: {
+  type: ActivityType;
+  desired: readonly WeatherConditionName[];
+  startTime: Date;
+  endTime: Date;
+  visit: ProbabilityVisitSource;
+}): number | null {
+  return computeProbability({
+    type: input.type,
+    desired: input.desired,
+    date: formatVisitDate(input.visit.date),
+    startTime: input.startTime,
+    endTime: input.endTime,
+    hourly: parseHourlyForecast(input.visit.hourlyForecast),
+  });
+}
+
+// Desfase de Guatemala (UTC-6, sin horario de verano), la zona de los crons.
+// Se usa solo cuando la visita aún no tiene pronóstico horario con su desfase.
+const FALLBACK_UTC_OFFSET_SECONDS = -6 * 60 * 60;
+
+/** Fecha de hoy en hora de Guatemala, como medianoche UTC (igual que `Visit.date`). */
+export function localToday(now: Date = new Date()): Date {
+  const local = new Date(now.getTime() + FALLBACK_UTC_OFFSET_SECONDS * 1000);
+  local.setUTCHours(0, 0, 0, 0);
+  return local;
+}
+
+/**
+ * Minutos que faltan para que empiece la actividad, en hora local de la
+ * ubicación de su visita (negativo si ya empezó). `startTime` y `date` son
+ * hora y fecha locales guardadas como UTC, por eso el "ahora" se desplaza con
+ * el desfase de la ubicación antes de compararlo.
+ */
+export function minutesUntilStart(
+  visit: ProbabilityVisitSource,
+  startTime: Date,
+  now: Date = new Date(),
+): number {
+  const offsetSeconds =
+    parseHourlyForecast(visit.hourlyForecast)?.utcOffsetSeconds ??
+    FALLBACK_UTC_OFFSET_SECONDS;
+  const localNowMs = now.getTime() + offsetSeconds * 1000;
+  const startMs = visit.date.getTime() + minutesOfDay(startTime) * 60_000;
+  return (startMs - localNowMs) / 60_000;
+}
+
+export function hasActivityEnded(
+  visit: ProbabilityVisitSource,
+  endTime: Date,
+  now: Date = new Date(),
+): boolean {
+  return minutesUntilStart(visit, endTime, now) <= 0;
+}
+
+const REASON_MAX_LENGTH = 500;
+
+/**
+ * Motivo legible que se guarda al cancelar por sistema: la probabilidad que
+ * lo causó y el pronóstico de cada hora de la franja.
+ */
+export function buildAutoCancelReason(
+  probability: number,
+  threshold: number,
+  hours: readonly HourlyForecastHour[],
+): string {
+  const detail = hours
+    .map(
+      (hour) =>
+        `${hour.time.slice(11, 16)} (${hour.precipitationProbability}% de precipitación, ` +
+        `${hour.windSpeed} km/h de viento, ${hour.cloudCover}% de nubosidad)`,
+    )
+    .join('; ');
+
+  const reason =
+    `Cancelada automáticamente: la probabilidad de realización bajó a ` +
+    `${probability}% (mínimo ${threshold}%). Pronóstico de la franja: ${detail}`;
+
+  return reason.length > REASON_MAX_LENGTH
+    ? `${reason.slice(0, REASON_MAX_LENGTH - 1)}…`
+    : reason;
 }

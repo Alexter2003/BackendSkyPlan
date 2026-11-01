@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpStatus,
+  Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -11,11 +13,19 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import {
   assertDateHasArrived,
   assertIsPlanned,
+  assertNotPastDate,
+  buildForecastFields,
+  parseVisitDate,
 } from '../visits/utils/visits.utils.js';
+import { WEATHER_PORT } from '../weather/interfaces/weather-port.interface.js';
+import type { WeatherPort } from '../weather/interfaces/weather-port.interface.js';
+import { getDayForecast } from '../weather/utils/day-forecast.utils.js';
 import { isWeatherConditionName } from '../weather/utils/weather-conditions.utils.js';
 import type { WeatherConditionName } from '../weather/constants/weather-conditions.constants.js';
+import type { CancelActivityDto } from './dto/cancel-activity.dto.js';
 import type { CreateActivityDto } from './dto/create-activity.dto.js';
 import type { ListActivitiesQueryDto } from './dto/list-activities-query.dto.js';
+import type { RescheduleActivityDto } from './dto/reschedule-activity.dto.js';
 import type { UpdateActivityDto } from './dto/update-activity.dto.js';
 import type { ActivityPublic } from './interfaces/activity-public.interface.js';
 import {
@@ -25,7 +35,11 @@ import {
   assertNoContradictions,
   assertNoOverlap,
   assertValidTimeRange,
+  computeActivityProbability,
+  hasActivityEnded,
+  isCancelled,
   parseTime,
+  resolveViability,
   toActivityPublic,
 } from './utils/activities.utils.js';
 import type { ActivityWithRelations } from './utils/activities.utils.js';
@@ -50,7 +64,10 @@ type ActivityWithVisit = ActivityWithRelations & { visit: Visit };
  */
 @Injectable()
 export class ActivitiesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(WEATHER_PORT) private readonly weather: WeatherPort,
+  ) {}
 
   async create(
     userId: number,
@@ -71,6 +88,13 @@ export class ActivitiesService {
       { type: dto.type, desired: names, weather: visit },
       visit.date,
     );
+    const probability = computeActivityProbability({
+      type: dto.type,
+      desired: names,
+      startTime: start,
+      endTime: end,
+      visit,
+    });
     const stateId = await this.getStateId(ACTIVITY_STATE.PLANNED);
 
     const activity = await this.prisma.activity.create({
@@ -84,6 +108,7 @@ export class ActivitiesService {
         endTime: end,
         isViable,
         viabilityCheckedAt: isViable === null ? null : new Date(),
+        probability,
         activityWeathers: {
           create: dto.weatherConditionIds.map((weatherConditionId) => ({
             weatherConditionId,
@@ -160,6 +185,7 @@ export class ActivitiesService {
     let viability: {
       isViable: boolean | null;
       viabilityCheckedAt: Date | null;
+      probability: number | null;
     } | null = null;
     let message = 'Actividad actualizada exitosamente';
 
@@ -184,6 +210,13 @@ export class ActivitiesService {
       viability = {
         isViable,
         viabilityCheckedAt: isViable === null ? null : new Date(),
+        probability: computeActivityProbability({
+          type,
+          desired: names,
+          startTime: start,
+          endTime: end,
+          visit: existing.visit,
+        }),
       };
       if (isViable === null) {
         message = VIABILITY_PENDING_MESSAGE;
@@ -201,6 +234,9 @@ export class ActivitiesService {
         ...(dto.startTime !== undefined ? { startTime: start } : {}),
         ...(dto.endTime !== undefined ? { endTime: end } : {}),
         ...viability,
+        // Cambiar el horario es una decisión nueva del usuario: la marca de
+        // reactivación de la franja anterior ya no aplica.
+        ...(scheduleChanged ? { reactivatedAt: null } : {}),
         ...(dto.weatherConditionIds
           ? {
               activityWeathers: {
@@ -246,10 +282,12 @@ export class ActivitiesService {
   }
 
   // Checklist: el usuario decide que ya no la va a realizar. Puede hacerlo en
-  // cualquier momento mientras la actividad siga planificada.
+  // cualquier momento mientras la actividad siga planificada. Queda registrada
+  // la fecha y, si el usuario lo envía, el motivo.
   async cancel(
     userId: number,
     id: number,
+    dto: CancelActivityDto = {},
   ): Promise<ServiceResponse<ActivityPublic>> {
     const existing = await this.findOwnedActivity(userId, id);
     this.assertActivityIsPlanned(existing);
@@ -257,7 +295,11 @@ export class ActivitiesService {
     const stateId = await this.getStateId(ACTIVITY_STATE.CANCELLED);
     const activity = await this.prisma.activity.update({
       where: { id },
-      data: { stateId },
+      data: {
+        stateId,
+        cancelledAt: new Date(),
+        cancelReason: dto.reason ?? null,
+      },
       include: ACTIVITY_INCLUDE,
     });
 
@@ -265,6 +307,191 @@ export class ActivitiesService {
       status: HttpStatus.OK,
       message: 'Actividad cancelada exitosamente',
       data: toActivityPublic(activity, existing.visit.date),
+    };
+  }
+
+  // El usuario revierte una cancelación (manual o del sistema). No se revalida
+  // el clima: la decisión es suya, y la marca `reactivatedAt` evita que el
+  // cron de la última hora vuelva a cancelarla. Sí se revalida el cruce de
+  // horario, porque una cancelada no ocupa lugar y alguien más pudo tomarlo.
+  async reactivate(
+    userId: number,
+    id: number,
+  ): Promise<ServiceResponse<ActivityPublic>> {
+    const existing = await this.findOwnedActivity(userId, id);
+
+    if (!isCancelled(existing.state.name)) {
+      throw new BadRequestException('La actividad no está cancelada');
+    }
+    assertIsPlanned(existing.visit);
+    if (hasActivityEnded(existing.visit, existing.endTime)) {
+      throw new BadRequestException(
+        'La actividad ya terminó, reagéndala para otra fecha u horario',
+      );
+    }
+    await assertNoOverlap(
+      this.prisma,
+      existing.visitId,
+      existing.startTime,
+      existing.endTime,
+      id,
+    );
+
+    const names = existing.activityWeathers
+      .map((link) => link.weatherCondition.name)
+      .filter(isWeatherConditionName);
+    const { isViable } = resolveViability({
+      type: existing.type,
+      desired: names,
+      weather: existing.visit,
+    });
+    const stateId = await this.getStateId(ACTIVITY_STATE.PLANNED);
+
+    const activity = await this.prisma.activity.update({
+      where: { id },
+      data: {
+        stateId,
+        cancelReason: null,
+        cancelledAt: null,
+        reactivatedAt: new Date(),
+        isViable,
+        viabilityCheckedAt: isViable === null ? null : new Date(),
+        probability: computeActivityProbability({
+          type: existing.type,
+          desired: names,
+          startTime: existing.startTime,
+          endTime: existing.endTime,
+          visit: existing.visit,
+        }),
+      },
+      include: ACTIVITY_INCLUDE,
+    });
+
+    return {
+      status: HttpStatus.OK,
+      message: 'Actividad reactivada exitosamente',
+      data: toActivityPublic(activity, existing.visit.date),
+    };
+  }
+
+  // Mueve una sola actividad a otra fecha y horario. La fecha vive en la
+  // visita, así que se busca la visita del usuario en esa fecha (solo puede
+  // haber una por fecha) o se crea una con el mismo nombre y coordenadas.
+  // Revalida cruce de horario y compatibilidad climática contra el destino, y
+  // reactiva la actividad si estaba cancelada.
+  async reschedule(
+    userId: number,
+    id: number,
+    dto: RescheduleActivityDto,
+  ): Promise<ServiceResponse<ActivityPublic>> {
+    const existing = await this.findOwnedActivity(userId, id);
+    if (existing.state.name === ACTIVITY_STATE.COMPLETED) {
+      throw new BadRequestException('La actividad ya fue completada');
+    }
+
+    const date = parseVisitDate(dto.date);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('La fecha no es válida');
+    }
+    assertNotPastDate(date);
+
+    const start = parseTime(dto.startTime);
+    const end = parseTime(dto.endTime);
+    assertValidTimeRange(start, end);
+
+    const names = existing.activityWeathers
+      .map((link) => link.weatherCondition.name)
+      .filter(isWeatherConditionName);
+
+    const target = await this.prisma.visit.findFirst({
+      where: { userId, date, isActive: true },
+    });
+
+    let weatherSource: Parameters<
+      typeof assertForecastCompatible
+    >[0]['weather'];
+    let hourlyForecast: unknown = null;
+    let newVisitFields: ReturnType<typeof buildForecastFields> | null = null;
+
+    if (target) {
+      assertIsPlanned(target);
+      if (
+        !target.latitude.equals(existing.visit.latitude) ||
+        !target.longitude.equals(existing.visit.longitude)
+      ) {
+        throw new ConflictException(
+          'Ya tienes una ubicación registrada para esa fecha en otro lugar',
+        );
+      }
+      await assertNoOverlap(this.prisma, target.id, start, end, id);
+      weatherSource = target;
+      hourlyForecast = target.hourlyForecast;
+    } else {
+      const forecast = await getDayForecast(
+        this.weather,
+        existing.visit.latitude.toNumber(),
+        existing.visit.longitude.toNumber(),
+        date,
+      );
+      newVisitFields = buildForecastFields(forecast);
+      weatherSource = newVisitFields;
+      hourlyForecast = forecast?.hourly ?? null;
+    }
+
+    const isViable = assertForecastCompatible(
+      { type: existing.type, desired: names, weather: weatherSource },
+      date,
+    );
+    const probability = computeActivityProbability({
+      type: existing.type,
+      desired: names,
+      startTime: start,
+      endTime: end,
+      visit: { date, hourlyForecast },
+    });
+    const stateId = await this.getStateId(ACTIVITY_STATE.PLANNED);
+
+    const activity = await this.prisma.$transaction(async (tx) => {
+      const visitId =
+        target?.id ??
+        (
+          await tx.visit.create({
+            data: {
+              userId,
+              name: existing.visit.name,
+              latitude: existing.visit.latitude,
+              longitude: existing.visit.longitude,
+              date,
+              ...newVisitFields,
+            },
+          })
+        ).id;
+
+      return tx.activity.update({
+        where: { id },
+        data: {
+          visitId,
+          startTime: start,
+          endTime: end,
+          stateId,
+          cancelReason: null,
+          cancelledAt: null,
+          reactivatedAt: null,
+          isViable,
+          viabilityCheckedAt: isViable === null ? null : new Date(),
+          probability,
+        },
+        include: ACTIVITY_INCLUDE,
+      });
+    });
+
+    return {
+      status: HttpStatus.OK,
+      message:
+        isViable === null
+          ? VIABILITY_PENDING_MESSAGE
+          : 'Actividad reagendada exitosamente',
+      data: toActivityPublic(activity, date),
     };
   }
 
@@ -319,7 +546,7 @@ export class ActivitiesService {
     if (activity.state.name === ACTIVITY_STATE.COMPLETED) {
       throw new BadRequestException('La actividad ya fue completada');
     }
-    if (activity.state.name === ACTIVITY_STATE.CANCELLED) {
+    if (isCancelled(activity.state.name)) {
       throw new BadRequestException('La actividad está cancelada');
     }
   }

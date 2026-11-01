@@ -45,6 +45,12 @@ function buildContent(
       message: `La actividad '${activityName}' ya no es viable según el pronóstico del clima`,
     };
   }
+  if (type === NotificationType.ACTIVITY_AUTO_CANCELLED) {
+    return {
+      title: 'Actividad cancelada automáticamente',
+      message: `La actividad '${activityName}' se canceló automáticamente porque el pronóstico del clima es desfavorable. Puedes reactivarla o reagendarla`,
+    };
+  }
   return {
     title: 'Actividad viable nuevamente',
     message: `La actividad '${activityName}' volvió a ser viable según el pronóstico del clima`,

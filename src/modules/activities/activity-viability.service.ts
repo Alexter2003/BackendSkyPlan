@@ -4,14 +4,20 @@ import type { Visit } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { isWeatherConditionName } from '../weather/utils/weather-conditions.utils.js';
-import { ACTIVITY_STATE, resolveViability } from './utils/activities.utils.js';
+import {
+  ACTIVITY_STATE,
+  computeActivityProbability,
+  resolveViability,
+} from './utils/activities.utils.js';
 
 /**
  * Reevalúa la viabilidad de las actividades de una visita cuando su clima se
  * actualiza (cron, cambio de fecha o ubicación) y avisa al usuario.
  *
- * Solo se evalúan las actividades OUTDOOR, activas y en estado `planned`: las
- * INDOOR no dependen del clima y las completadas/canceladas están congeladas.
+ * Se evalúan las actividades activas y en estado `planned` (las completadas y
+ * canceladas están congeladas). A todas se les recalcula `probability` con el
+ * pronóstico horario de la visita; `isViable` y los avisos solo aplican a las
+ * OUTDOOR, porque las INDOOR no dependen del clima.
  *
  * Transiciones de `isViable` y su efecto:
  *   null  -> true   solo queda validada, no se notifica
@@ -24,7 +30,9 @@ import { ACTIVITY_STATE, resolveViability } from './utils/activities.utils.js';
  *                       de validar, sin aviso. Un valor viejo no se conserva
  *                       porque ya no describe la fecha/ubicación actual.
  *
- * Este servicio nunca cancela una actividad; esa decisión es del usuario.
+ * Este servicio nunca cancela una actividad: avisa, y la decisión es del
+ * usuario. La única cancelación automática es la de la última hora
+ * (ActivityAutoCancelService), que además respeta las reactivaciones.
  */
 @Injectable()
 export class ActivityViabilityService {
@@ -38,7 +46,6 @@ export class ActivityViabilityService {
       where: {
         visitId: visit.id,
         isActive: true,
-        type: ActivityType.OUTDOOR,
         state: { name: ACTIVITY_STATE.PLANNED },
       },
       include: { activityWeathers: { include: { weatherCondition: true } } },
@@ -49,6 +56,25 @@ export class ActivityViabilityService {
         .map((link) => link.weatherCondition.name)
         .filter(isWeatherConditionName);
 
+      const probability = computeActivityProbability({
+        type: activity.type,
+        desired,
+        startTime: activity.startTime,
+        endTime: activity.endTime,
+        visit,
+      });
+
+      // Las INDOOR no dependen del clima: solo se refresca su probabilidad.
+      if (activity.type === ActivityType.INDOOR) {
+        if (activity.probability !== probability) {
+          await this.prisma.activity.update({
+            where: { id: activity.id },
+            data: { probability },
+          });
+        }
+        continue;
+      }
+
       const { isViable } = resolveViability({
         type: activity.type,
         desired,
@@ -58,10 +84,13 @@ export class ActivityViabilityService {
       // Sin datos de clima no se sabe si es viable: vuelve a "pendiente de
       // validar" (null), sin avisar, hasta que haya pronóstico otra vez.
       if (isViable === null) {
-        if (activity.isViable !== null) {
+        if (
+          activity.isViable !== null ||
+          activity.probability !== probability
+        ) {
           await this.prisma.activity.update({
             where: { id: activity.id },
-            data: { isViable: null, viabilityCheckedAt: null },
+            data: { isViable: null, viabilityCheckedAt: null, probability },
           });
         }
         continue;
@@ -69,7 +98,7 @@ export class ActivityViabilityService {
 
       await this.prisma.activity.update({
         where: { id: activity.id },
-        data: { isViable, viabilityCheckedAt: new Date() },
+        data: { isViable, viabilityCheckedAt: new Date(), probability },
       });
 
       const target = {

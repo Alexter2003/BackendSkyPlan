@@ -6,9 +6,10 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { ActivityType, VisitStatus } from '@prisma/client';
+import { ActivityType, Prisma, VisitStatus } from '@prisma/client';
 import { PrismaService } from '../../../src/prisma/prisma.service.js';
 import { ActivitiesService } from '../../../src/modules/activities/activities.service.js';
+import { WEATHER_PORT } from '../../../src/modules/weather/interfaces/weather-port.interface.js';
 import type { CreateActivityDto } from '../../../src/modules/activities/dto/create-activity.dto.js';
 
 const userId = 1;
@@ -36,8 +37,12 @@ function visitWith(weather: object, overrides: object = {}) {
   return {
     id: 10,
     userId,
+    name: 'Antigua Guatemala',
+    latitude: new Prisma.Decimal(14.5586),
+    longitude: new Prisma.Decimal(-90.7295),
     date: new Date('2026-10-05T00:00:00Z'),
     status: VisitStatus.PLANNED,
+    hourlyForecast: null,
     isActive: true,
     ...weather,
     ...overrides,
@@ -63,7 +68,11 @@ function activityRow(overrides: object = {}) {
     endTime: new Date('1970-01-01T11:00:00Z'),
     isViable: true,
     viabilityCheckedAt: new Date('2026-10-04T12:00:00Z'),
+    probability: null,
     completedAt: null,
+    cancelReason: null,
+    cancelledAt: null,
+    reactivatedAt: null,
     isActive: true,
     state: { id: 1, name: 'planned' },
     activityWeathers: [{ weatherCondition: conditions[0] }],
@@ -88,7 +97,13 @@ describe('ActivitiesService', () => {
     activity: Record<string, ReturnType<typeof vi.fn>>;
     weatherCondition: { findMany: ReturnType<typeof vi.fn> };
     state: { findUnique: ReturnType<typeof vi.fn> };
+    $transaction: ReturnType<typeof vi.fn>;
   };
+  let tx: {
+    visit: { create: ReturnType<typeof vi.fn> };
+    activity: { update: ReturnType<typeof vi.fn> };
+  };
+  let weather: { getForecastRange: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -98,6 +113,7 @@ describe('ActivitiesService', () => {
       planned: 1,
       completed: 2,
       cancelled: 3,
+      cancelled_by_system: 4,
     };
     prisma = {
       visit: { findFirst: vi.fn().mockResolvedValue(visitWith(sunnyWeather)) },
@@ -126,12 +142,25 @@ describe('ActivitiesService', () => {
             Promise.resolve({ id: states[where.name], name: where.name }),
           ),
       },
+      $transaction: vi.fn(),
     };
+
+    tx = {
+      visit: { create: vi.fn().mockResolvedValue({ id: 99 }) },
+      activity: { update: prisma.activity.update },
+    };
+    prisma.$transaction = vi
+      .fn()
+      .mockImplementation((callback: (client: typeof tx) => unknown) =>
+        callback(tx),
+      );
+    weather = { getForecastRange: vi.fn().mockResolvedValue(new Map()) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ActivitiesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: WEATHER_PORT, useValue: weather },
       ],
     }).compile();
 
@@ -445,8 +474,37 @@ describe('ActivitiesService', () => {
 
       expect(prisma.activity.update.mock.calls[0][0].data).toEqual({
         stateId: 3,
+        cancelledAt: new Date('2026-10-04T12:00:00Z'),
+        cancelReason: null,
       });
     });
+
+    it('stores the reason the user sends', async () => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow(),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await service.cancel(userId, 5, { reason: 'Me enfermé' });
+
+      expect(prisma.activity.update.mock.calls[0][0].data.cancelReason).toBe(
+        'Me enfermé',
+      );
+    });
+
+    it.each(['cancelled', 'cancelled_by_system'])(
+      'rejects cancelling an activity that is already %s',
+      async (name) => {
+        prisma.activity.findFirst.mockResolvedValue({
+          ...activityRow({ state: { id: 3, name } }),
+          visit: visitWith(sunnyWeather),
+        });
+
+        await expect(service.cancel(userId, 5)).rejects.toThrow(
+          BadRequestException,
+        );
+      },
+    );
 
     it('rejects cancelling a completed activity', async () => {
       prisma.activity.findFirst.mockResolvedValue({
@@ -457,6 +515,309 @@ describe('ActivitiesService', () => {
       await expect(service.cancel(userId, 5)).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('probability and reactivation marker', () => {
+    const hourlyForecast = {
+      utcOffsetSeconds: -21600,
+      hours: [9, 10].map((hour) => ({
+        time: `2026-10-05T${String(hour).padStart(2, '0')}:00`,
+        weatherCode: 0,
+        precipitation: 0,
+        cloudCover: 5,
+        windSpeed: 5,
+        precipitationProbability: 10,
+      })),
+    };
+
+    it('persists the probability computed from the visit hourly forecast on create', async () => {
+      prisma.visit.findFirst.mockResolvedValue(
+        visitWith(sunnyWeather, { hourlyForecast }),
+      );
+
+      await service.create(userId, createDto);
+
+      expect(prisma.activity.create.mock.calls[0][0].data.probability).toBe(90);
+    });
+
+    it('leaves the probability null when the visit has no hourly forecast', async () => {
+      await service.create(userId, createDto);
+
+      expect(
+        prisma.activity.create.mock.calls[0][0].data.probability,
+      ).toBeNull();
+    });
+
+    it('clears the reactivation marker when the schedule changes', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce({
+          ...activityRow({ reactivatedAt: new Date('2026-10-04T10:00:00Z') }),
+          visit: visitWith(sunnyWeather),
+        })
+        .mockResolvedValueOnce(null);
+
+      await service.update(userId, 5, { startTime: '10:00', endTime: '12:00' });
+
+      expect(
+        prisma.activity.update.mock.calls[0][0].data.reactivatedAt,
+      ).toBeNull();
+    });
+
+    it('keeps the reactivation marker when only the name changes', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce({
+        ...activityRow({ reactivatedAt: new Date('2026-10-04T10:00:00Z') }),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await service.update(userId, 5, { name: 'Otro nombre' });
+
+      expect(prisma.activity.update.mock.calls[0][0].data).not.toHaveProperty(
+        'reactivatedAt',
+      );
+    });
+  });
+
+  describe('reactivate', () => {
+    function cancelled(name: string, visit: object = visitWith(rainyWeather)) {
+      return {
+        ...activityRow({
+          state: { id: 4, name },
+          cancelReason: 'Cancelada automáticamente',
+          cancelledAt: new Date('2026-10-04T11:00:00Z'),
+        }),
+        visit,
+      };
+    }
+
+    it.each(['cancelled', 'cancelled_by_system'])(
+      'reactivates a %s activity even if the forecast is still bad',
+      async (name) => {
+        prisma.activity.findFirst
+          .mockResolvedValueOnce(cancelled(name))
+          .mockResolvedValueOnce(null);
+
+        const result = await service.reactivate(userId, 5);
+
+        expect(result.status).toBe(HttpStatus.OK);
+        expect(prisma.activity.update.mock.calls[0][0].data).toMatchObject({
+          stateId: 1,
+          cancelReason: null,
+          cancelledAt: null,
+          reactivatedAt: new Date('2026-10-04T12:00:00Z'),
+        });
+      },
+    );
+
+    it('rejects an activity that is not cancelled', async () => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow(),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await expect(service.reactivate(userId, 5)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects with 409 when another activity took the schedule', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce(cancelled('cancelled_by_system'))
+        .mockResolvedValueOnce({
+          name: 'Almuerzo',
+          startTime: new Date('1970-01-01T10:00:00Z'),
+          endTime: new Date('1970-01-01T12:00:00Z'),
+        });
+
+      await expect(service.reactivate(userId, 5)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an activity whose end time already passed in the visit local time', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce(
+        cancelled(
+          'cancelled',
+          visitWith(rainyWeather, { date: new Date('2026-10-03T00:00:00Z') }),
+        ),
+      );
+
+      await expect(service.reactivate(userId, 5)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects when the visit itself is cancelled', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce(
+        cancelled(
+          'cancelled',
+          visitWith(rainyWeather, { status: VisitStatus.CANCELLED }),
+        ),
+      );
+
+      await expect(service.reactivate(userId, 5)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('reschedule', () => {
+    const dto = { date: '2026-10-06', startTime: '14:00', endTime: '16:00' };
+    const owned = () => ({
+      ...activityRow(),
+      visit: visitWith(sunnyWeather),
+    });
+    const targetVisit = (overrides: object = {}) =>
+      visitWith(sunnyWeather, {
+        id: 11,
+        date: new Date('2026-10-06T00:00:00Z'),
+        ...overrides,
+      });
+
+    it('moves the activity to the existing visit of that date at the same place', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce(owned())
+        .mockResolvedValueOnce(null);
+      prisma.visit.findFirst.mockResolvedValue(targetVisit());
+
+      await service.reschedule(userId, 5, dto);
+
+      expect(tx.visit.create).not.toHaveBeenCalled();
+      expect(prisma.activity.update.mock.calls[0][0].data).toMatchObject({
+        visitId: 11,
+        startTime: new Date('1970-01-01T14:00:00Z'),
+        endTime: new Date('1970-01-01T16:00:00Z'),
+        stateId: 1,
+        reactivatedAt: null,
+      });
+    });
+
+    it('creates the visit for that date, copying name and coordinates, when none exists', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce(owned());
+      prisma.visit.findFirst.mockResolvedValue(null);
+      weather.getForecastRange.mockResolvedValue(
+        new Map([
+          [
+            '2026-10-06',
+            {
+              snapshot: {
+                temperature: 22,
+                humidity: 50,
+                precipitation: 0,
+                atmosphericPressure: 1013,
+                cloudCover: 5,
+                windSpeed: 8,
+                weatherCode: 0,
+              },
+              hourly: null,
+            },
+          ],
+        ]),
+      );
+
+      await service.reschedule(userId, 5, dto);
+
+      const created = tx.visit.create.mock.calls[0][0].data;
+      expect(created).toMatchObject({
+        userId,
+        name: 'Antigua Guatemala',
+        date: new Date('2026-10-06T00:00:00Z'),
+      });
+      expect(prisma.activity.update.mock.calls[0][0].data.visitId).toBe(99);
+    });
+
+    it('accepts a date without forecast and leaves viability pending', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce(owned());
+      prisma.visit.findFirst.mockResolvedValue(null);
+
+      const result = await service.reschedule(userId, 5, dto);
+
+      const data = prisma.activity.update.mock.calls[0][0].data;
+      expect(data.isViable).toBeNull();
+      expect(data.probability).toBeNull();
+      expect(result.message).toContain('Se validará');
+    });
+
+    it('rejects with 409 when the new schedule overlaps an activity of the target visit', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce(owned())
+        .mockResolvedValueOnce({
+          name: 'Almuerzo',
+          startTime: new Date('1970-01-01T15:00:00Z'),
+          endTime: new Date('1970-01-01T17:00:00Z'),
+        });
+      prisma.visit.findFirst.mockResolvedValue(targetVisit());
+
+      await expect(service.reschedule(userId, 5, dto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 422 when the forecast of the target date is incompatible', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce(owned())
+        .mockResolvedValueOnce(null);
+      prisma.visit.findFirst.mockResolvedValue(targetVisit(rainyWeather));
+
+      await expect(service.reschedule(userId, 5, dto)).rejects.toThrow(
+        UnprocessableEntityException,
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 409 when the user already has a visit that date at another place', async () => {
+      prisma.activity.findFirst.mockResolvedValueOnce(owned());
+      prisma.visit.findFirst.mockResolvedValue(
+        targetVisit({ latitude: new Prisma.Decimal(15.5) }),
+      );
+
+      await expect(service.reschedule(userId, 5, dto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(tx.visit.create).not.toHaveBeenCalled();
+    });
+
+    it('reactivates a cancelled-by-system activity and clears its cancellation data', async () => {
+      prisma.activity.findFirst
+        .mockResolvedValueOnce({
+          ...activityRow({
+            state: { id: 4, name: 'cancelled_by_system' },
+            cancelReason: 'x',
+            cancelledAt: new Date(),
+            reactivatedAt: new Date(),
+          }),
+          visit: visitWith(sunnyWeather),
+        })
+        .mockResolvedValueOnce(null);
+      prisma.visit.findFirst.mockResolvedValue(targetVisit());
+
+      await service.reschedule(userId, 5, dto);
+
+      expect(prisma.activity.update.mock.calls[0][0].data).toMatchObject({
+        stateId: 1,
+        cancelReason: null,
+        cancelledAt: null,
+        reactivatedAt: null,
+      });
+    });
+
+    it.each([
+      ['a completed activity', { state: { id: 2, name: 'completed' } }, dto],
+      ['a past date', {}, { ...dto, date: '2026-10-03' }],
+      ['an invalid calendar date', {}, { ...dto, date: '2026-02-31' }],
+      ['an end before the start', {}, { ...dto, startTime: '17:00' }],
+    ])('rejects %s with 400', async (_label, overrides, body) => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow(overrides),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await expect(service.reschedule(userId, 5, body)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
     });
   });
 
