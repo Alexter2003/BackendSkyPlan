@@ -17,8 +17,15 @@ import type { MailPort } from '../mail/interfaces/mail-port.interface.js';
 import type { CreateUserDto } from './dto/create-user.dto.js';
 import type { ConfirmEmailDto } from './dto/confirm-email.dto.js';
 import type { ResendConfirmationDto } from './dto/resend-confirmation.dto.js';
+import type { AuthenticatedUser } from '../../common/guards/session.guard.js';
+import type { UpdateProfileDto } from './dto/update-profile.dto.js';
+import type { UserProfile } from './interfaces/user-profile.interface.js';
 import type { UserPublic } from './interfaces/user-public.interface.js';
-import { issueConfirmationCode, toUserPublic } from './utils/users.utils.js';
+import {
+  issueConfirmationCode,
+  toUserProfile,
+  toUserPublic,
+} from './utils/users.utils.js';
 
 const DEFAULT_BCRYPT_SALT_ROUNDS = 12;
 const CONFIRMATION_CODE_TTL_MINUTES = 30;
@@ -221,5 +228,37 @@ export class UsersService {
     }
 
     return genericResponse;
+  }
+
+  getProfile(user: AuthenticatedUser): ServiceResponse<UserProfile> {
+    return {
+      status: HttpStatus.OK,
+      message: 'Perfil obtenido exitosamente',
+      data: toUserProfile(user),
+    };
+  }
+
+  async updateProfile(
+    user: AuthenticatedUser,
+    dto: UpdateProfileDto,
+  ): Promise<ServiceResponse<UserProfile>> {
+    if (dto.firstName === undefined && dto.lastName === undefined) {
+      throw new BadRequestException('Envía al menos firstName o lastName');
+    }
+
+    // Solo se escriben los campos enviados: una edición parcial conserva el otro.
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(dto.firstName !== undefined && { firstName: dto.firstName }),
+        ...(dto.lastName !== undefined && { lastName: dto.lastName }),
+      },
+    });
+
+    return {
+      status: HttpStatus.OK,
+      message: 'Perfil actualizado exitosamente',
+      data: toUserProfile(updated),
+    };
   }
 }

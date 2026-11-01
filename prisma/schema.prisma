@@ -14,6 +14,8 @@ model User {
   id                    Int       @id @default(autoincrement())
   email                 String    @unique @db.VarChar(255)
   username              String    @unique @db.VarChar(255)
+  firstName             String?   @db.VarChar(100)
+  lastName              String?   @db.VarChar(100)
   passwordHash          String    @db.VarChar(255)
   emailConfirmed        Boolean   @default(false)
   isActive              Boolean   @default(true)

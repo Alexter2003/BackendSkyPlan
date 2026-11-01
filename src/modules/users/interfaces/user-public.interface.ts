@@ -4,6 +4,8 @@ export interface UserPublic {
   id: number;
   email: string;
   username: string;
+  firstName: string | null;
+  lastName: string | null;
   emailConfirmed: boolean;
   createdAt: Date;
 }

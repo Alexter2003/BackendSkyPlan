@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import type { Prisma, User } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
+import type { UserProfile } from '../interfaces/user-profile.interface.js';
 import type { UserPublic } from '../interfaces/user-public.interface.js';
 
 const CONFIRMATION_CODE_LENGTH = 5;
@@ -15,14 +16,20 @@ export function generateConfirmationCode(): string {
   return code;
 }
 
-export function toUserPublic(user: User): UserPublic {
+export function toUserPublic(user: Omit<User, 'passwordHash'>): UserPublic {
   return {
     id: user.id,
     email: user.email,
     username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
     emailConfirmed: user.emailConfirmed,
     createdAt: user.createdAt,
   };
+}
+
+export function toUserProfile(user: Omit<User, 'passwordHash'>): UserProfile {
+  return { ...toUserPublic(user), mustChangePassword: user.mustChangePassword };
 }
 
 // Invalida cualquier confirmación aún activa de este usuario y emite una
