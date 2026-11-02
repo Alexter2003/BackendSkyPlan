@@ -42,13 +42,18 @@ hora: si falta 1 hora o menos para que empiece y su probabilidad es menor a 30, 
 ### Visita
 
 ```
-PLANNED ──complete──▶ COMPLETED   (solo si la fecha ya llegó)
+PLANNED ──complete──▶ COMPLETED   (a mano, solo si la fecha ya llegó)
+   │  ▲                    │
+   │  │                    │   o sola, al completar/cancelar su última actividad pendiente
+   │  └───uncomplete───────┘   (deshacer una actividad completada la reabre)
    │
    └─────cancel────▶ CANCELLED    (cualquier fecha; cancela sus actividades `planned`)
 ```
 
 `DELETE` es un borrado lógico aparte: oculta la visita y sus actividades.
-Una visita `COMPLETED` o `CANCELLED` ya no se puede editar ni recibe actividades nuevas.
+Una visita `COMPLETED` o `CANCELLED` ya no se puede editar ni recibe actividades nuevas. Solo
+una `COMPLETED` puede reabrirse, y únicamente deshaciendo una actividad completada; la `CANCELLED`
+nunca. "La fecha ya llegó" se evalúa con el día de Guatemala (UTC-6).
 
 ### Actividad (checklist)
 
@@ -61,7 +66,8 @@ planned ──complete──▶ completed             (solo si la fecha de su vi
    └──auto (<= 1 h, probabilidad < 30)▶ cancelled_by_system
 ```
 
-Una actividad `completed` queda congelada. Una `cancelled` o `cancelled_by_system` no se edita,
+Una actividad `completed` no se edita, pero se puede **deshacer** (`PATCH /:id/uncomplete`), que la
+devuelve a `planned`. Una `cancelled` o `cancelled_by_system` no se edita,
 pero se puede **reactivar** (`PATCH /:id/reactivate`) o **reagendar** (`PATCH /:id/reschedule`),
 que la devuelve a `planned`.
 
@@ -165,6 +171,23 @@ Por cada actividad:
 - `PATCH /api/activities/:id/complete`: la hizo. Solo desde el día de la visita; guarda `completedAt`.
 - `PATCH /api/activities/:id/cancel`: ya no la va a hacer (por ejemplo, tras el aviso de mal
   clima). Acepta un `reason` opcional.
+- `PATCH /api/activities/:id/uncomplete`: se equivocó al marcarla; vuelve a `planned`.
+
+Las tres respuestas traen `visitStatus`, el estado en que quedó la visita. La visita **se cierra
+sola** (`COMPLETED`) cuando, tras completar o cancelar, ya no queda ninguna actividad `planned` y
+hay al menos una `completed`; y **se reabre** (`PLANNED`) si se deshace una actividad de una
+visita `COMPLETED`. Si todas quedan canceladas, la visita sigue `PLANNED`.
+
+```
+visita con A, B (planned)
+  complete A   ──▶ visitStatus PLANNED      (B pendiente)
+  complete B   ──▶ visitStatus COMPLETED    (cierre automático)
+  uncomplete B ──▶ visitStatus PLANNED      (se reabre)
+```
+
+Todas las visitas traen `progress: { completed, total }` (canceladas y eliminadas no cuentan)
+para pintar "2 de 3" sin pedir sus actividades. Actualiza la visita en pantalla con `visitStatus`
+y refréscala al volver a primer plano.
 
 ### 7b. Se canceló por lluvia: reactivar o reagendar
 
@@ -191,11 +214,14 @@ proyectado de cada una, `probability`/`probabilityBand`, `state`, y filtros por 
 
 | Acción | Efecto en la visita | Efecto en sus actividades |
 |---|---|---|
-| `PATCH /api/visits/:id/complete` (solo si la fecha llegó) | `COMPLETED`, queda congelada | Ninguno: las que sigan `planned` quedan como no realizadas |
+| `PATCH /api/visits/:id/complete` (a mano, solo si la fecha llegó) | `COMPLETED` | Ninguno: las que sigan `planned` quedan `planned` |
+| Completar o cancelar la última actividad pendiente | `COMPLETED` automático (si hay alguna completada) | Ninguno |
+| `PATCH /api/activities/:id/uncomplete` sobre una visita `COMPLETED` | Vuelve a `PLANNED` | La actividad vuelve a `planned` |
 | `PATCH /api/visits/:id/cancel` | `CANCELLED` | Las `planned` pasan a `cancelled` |
 | `DELETE /api/visits/:id` | Se oculta | Se ocultan todas |
 
-Una visita `COMPLETED` o `CANCELLED` deja de revisarse en las corridas de clima.
+Una visita `COMPLETED` o `CANCELLED` deja de revisarse en las corridas de clima; si se reabre,
+vuelve a revisarse.
 
 ---
 
@@ -216,6 +242,10 @@ Una visita `COMPLETED` o `CANCELLED` deja de revisarse en las corridas de clima.
   cancela.
 - Una visita solo puede existir una por fecha: reagendar a un día que ya tiene una visita en
   otro lugar responde `409`.
+- El cierre automático solo lo disparan completar y cancelar una actividad: la cancelación
+  automática por clima, `reschedule` y `DELETE` no cierran la visita.
+- Una visita finalizada a mano con actividades `planned` las deja `planned`; si luego se deshace
+  una completada, la visita se reabre.
 - El WebSocket no es un push del sistema operativo: solo llega con la app abierta o activa en
   segundo plano. Lo perdido se recupera con `GET /api/notifications`.
 - Para "solo actividades con mala probabilidad" usa `GET /api/activities/upcoming` con

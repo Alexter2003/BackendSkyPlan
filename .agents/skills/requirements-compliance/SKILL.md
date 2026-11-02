@@ -135,6 +135,14 @@ implemented in the backend.
   user can always undo it (`PATCH /:id/reactivate`). The job-vs-on-demand decision is documented
   in `docs/api/activities.md`.
 
+**Checklist (change `visit-checklist`, openspec):** the visit/activity to-do behaviour is covered.
+`complete`/`cancel` of an activity close the visit automatically (no `planned` left and at least
+one `completed`), `PATCH /activities/:id/uncomplete` undoes a check and reopens a `COMPLETED`
+visit (never a `CANCELLED` one), responses carry `visitStatus`, every visit carries
+`progress: { completed, total }`, and "the date has arrived" uses the Guatemala day. Only user
+checks close a visit; the weather auto-cancel, `reschedule` and `remove` never do. Photos and
+the memories gallery are not part of the app.
+
 ## Team-adopted scope (beyond the graded checklist)
 
 These are not in the official brief, but the team has adopted them as committed project scope —

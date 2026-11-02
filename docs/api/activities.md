@@ -286,12 +286,53 @@ Los mismos de crear (400/409/422), más:
 
 Sin body. Marca la actividad como `completed` y guarda `completedAt`.
 
-`200 OK`, `message`: `"Actividad completada exitosamente"`, `data`: el `Activity`.
+Se puede marcar desde que llega el **día de la visita en Guatemala (UTC-6)**; no se exige que
+haya pasado la hora de inicio de la actividad. Con la fecha de la visita en el futuro responde
+`400`.
+
+`200 OK`, `message`: `"Actividad completada exitosamente"`, `data`: el `Activity` más `visitStatus`
+(ver "Estado de la visita en el checklist" abajo).
 
 | Status | Cuándo | `message` |
 |---|---|---|
 | 400 | La fecha de la visita todavía no llega | `"No puedes finalizar una visita cuya fecha aún no ha llegado"` |
 | 400 | Ya está completada o cancelada | `"La actividad ya fue completada"` / `"La actividad está cancelada"` |
+| 404 | No existe o no es del usuario | `"Actividad no encontrada"` |
+
+---
+
+## 5.1. Deshacer completar (checklist) — `PATCH /api/activities/:id/uncomplete`
+
+Desmarca una actividad `completed` por error: vuelve a `planned` y `completedAt` queda en `null`.
+Sin body.
+
+`200 OK`, `message`: `"Actividad desmarcada exitosamente"`, `data`: el `Activity` más `visitStatus`.
+
+Si el check había cerrado la visita (sola o finalizada a mano), **la visita se reabre**: pasa de
+`COMPLETED` a `PLANNED` y `visitStatus` lo refleja. Es la única forma de que una visita deje de
+estar finalizada. No se revalida el cruce de horario ni el clima: una actividad completada seguía
+ocupando su franja.
+
+```json
+{
+  "status": 200,
+  "message": "Actividad desmarcada exitosamente",
+  "data": {
+    "id": 5,
+    "visitId": 10,
+    "state": { "id": 1, "name": "planned" },
+    "completedAt": null,
+    "visitStatus": "PLANNED"
+  }
+}
+```
+
+(El ejemplo omite el resto de campos del `Activity` para abreviar; vienen todos.)
+
+| Status | Cuándo | `message` |
+|---|---|---|
+| 400 | La actividad no está completada (está `planned` o cancelada) | `"La actividad no está completada"` |
+| 400 | La visita está cancelada | `"La visita está cancelada"` |
 | 404 | No existe o no es del usuario | `"Actividad no encontrada"` |
 
 ---
@@ -308,7 +349,42 @@ El usuario decide que ya no la va a realizar; se puede hacer en cualquier moment
 `reason`: opcional, 1 a 500 caracteres. Sin body también es válido.
 
 `200 OK`, `message`: `"Actividad cancelada exitosamente"`, `data`: el `Activity` con
-`state.name: "cancelled"`, `cancelledAt` y `cancelReason` (`null` si no se envió).
+`state.name: "cancelled"`, `cancelledAt` y `cancelReason` (`null` si no se envió), más
+`visitStatus` (ver abajo).
+
+### Estado de la visita en el checklist (`visitStatus`)
+
+`complete`, `cancel` y `uncomplete` devuelven, junto a la actividad, el estado en que quedó su
+visita:
+
+```json
+{
+  "status": 200,
+  "message": "Actividad completada exitosamente",
+  "data": {
+    "id": 5,
+    "visitId": 10,
+    "state": { "id": 2, "name": "completed" },
+    "completedAt": "2026-09-28T16:20:00.000Z",
+    "visitStatus": "COMPLETED"
+  }
+}
+```
+
+(El ejemplo omite el resto de campos del `Activity` para abreviar; vienen todos.)
+
+`visitStatus` puede cambiar solo por la acción:
+
+- **Cierre automático.** Cuando, tras completar o cancelar una actividad, la visita ya no tiene
+  ninguna actividad `planned` y tiene al menos una `completed`, pasa sola a `COMPLETED`.
+- Si todas las actividades quedan canceladas (ninguna completada), la visita **sigue `PLANNED`**:
+  cancelarla o finalizarla es decisión del usuario.
+- Una visita con fecha futura no se cierra sola (no puede tener actividades completadas).
+- Solo completar y cancelar disparan el cierre. La cancelación automática por clima,
+  `reschedule` y `DELETE` **no** cambian el estado de la visita.
+- Una visita ya `COMPLETED` o `CANCELLED` conserva su estado.
+
+La app debe usar `visitStatus` para actualizar la visita en pantalla sin volver a pedirla.
 
 | Status | Cuándo | `message` |
 |---|---|---|
