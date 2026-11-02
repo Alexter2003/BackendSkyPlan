@@ -11,6 +11,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { VisitsModule } from './modules/visits/visits.module.js';
 import { ActivitiesModule } from './modules/activities/activities.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { HealthModule } from './modules/health/health.module.js';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     VisitsModule,
     ActivitiesModule,
     NotificationsModule,
+    HealthModule,
   ],
   providers: [
     {
