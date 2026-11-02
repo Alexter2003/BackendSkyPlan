@@ -31,9 +31,11 @@ type PrismaMock = {
   };
   activity: {
     updateMany: ReturnType<typeof vi.fn>;
+    groupBy: ReturnType<typeof vi.fn>;
   };
   state: {
     findUnique: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
   };
   $transaction: ReturnType<typeof vi.fn>;
 };
@@ -48,9 +50,14 @@ function createPrismaMock(): PrismaMock {
     },
     activity: {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     state: {
       findUnique: vi.fn().mockResolvedValue({ id: 3, name: 'cancelled' }),
+      findMany: vi.fn().mockResolvedValue([
+        { id: 1, name: 'planned' },
+        { id: 2, name: 'completed' },
+      ]),
     },
     $transaction: vi.fn(),
   };
@@ -478,6 +485,88 @@ describe('VisitsService', () => {
         NotFoundException,
       );
       expect(prisma.visit.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('progress', () => {
+    const emptyProgress = { completed: 0, total: 0 };
+
+    it('create returns an empty progress', async () => {
+      const result = await service.create(userId, createDto);
+
+      expect(result.data.progress).toEqual(emptyProgress);
+    });
+
+    it('findAll attaches each visit its own progress with one grouped query', async () => {
+      prisma.visit.findMany.mockResolvedValue([
+        baseVisit,
+        { ...baseVisit, id: 11 },
+      ]);
+      prisma.activity.groupBy.mockResolvedValue([
+        { visitId: 10, stateId: 2, _count: { _all: 2 } },
+        { visitId: 10, stateId: 1, _count: { _all: 1 } },
+      ]);
+
+      const result = await service.findAll(userId);
+
+      expect(result.data[0].progress).toEqual({ completed: 2, total: 3 });
+      expect(result.data[1].progress).toEqual(emptyProgress);
+      expect(prisma.activity.groupBy).toHaveBeenCalledTimes(1);
+    });
+
+    it('findOne derives the progress from the loaded activities, ignoring cancelled ones', async () => {
+      const activity = (id: number, state: string) => ({
+        id,
+        visitId: baseVisit.id,
+        name: `A${id}`,
+        description: 'x',
+        type: 'INDOOR',
+        startTime: new Date('1970-01-01T08:00:00Z'),
+        endTime: new Date('1970-01-01T09:00:00Z'),
+        isViable: null,
+        viabilityCheckedAt: null,
+        probability: null,
+        completedAt: null,
+        cancelReason: null,
+        cancelledAt: null,
+        state: { id, name: state },
+        activityWeathers: [],
+      });
+      prisma.visit.findFirst.mockResolvedValue({
+        ...baseVisit,
+        activities: [
+          activity(1, 'completed'),
+          activity(2, 'completed'),
+          activity(3, 'planned'),
+          activity(4, 'cancelled'),
+          activity(5, 'cancelled_by_system'),
+        ],
+      });
+
+      const result = await service.findOne(userId, baseVisit.id);
+
+      expect(result.data.progress).toEqual({ completed: 2, total: 3 });
+      expect(prisma.activity.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('update, complete and cancel include the progress', async () => {
+      const pastVisit = {
+        ...baseVisit,
+        date: new Date('2026-09-20T00:00:00Z'),
+      };
+      prisma.visit.findFirst.mockResolvedValue(pastVisit);
+      prisma.activity.groupBy.mockResolvedValue([
+        { visitId: 10, stateId: 2, _count: { _all: 1 } },
+      ]);
+      prisma.visit.update.mockResolvedValue(pastVisit);
+
+      const updated = await service.update(userId, 10, { name: 'Nuevo' });
+      const completed = await service.complete(userId, 10);
+      const cancelled = await service.cancel(userId, 10);
+
+      for (const result of [updated, completed, cancelled]) {
+        expect(result.data.progress).toEqual({ completed: 1, total: 1 });
+      }
     });
   });
 });
