@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+.git
+.env
+.env.*
+!.env.example
+*.log
+.claude
+.agents
+.vscode
+.idea
+openspec
+docs
+test
+graphify-out
+.DS_Store
