@@ -21,7 +21,10 @@ import { ListActivitiesQueryDto } from './dto/list-activities-query.dto.js';
 import { ListUpcomingActivitiesQueryDto } from './dto/list-upcoming-activities-query.dto.js';
 import { RescheduleActivityDto } from './dto/reschedule-activity.dto.js';
 import { UpdateActivityDto } from './dto/update-activity.dto.js';
-import type { ActivityPublic } from './interfaces/activity-public.interface.js';
+import type {
+  ActivityChecklistResult,
+  ActivityPublic,
+} from './interfaces/activity-public.interface.js';
 import type { UpcomingActivitiesPage } from './interfaces/upcoming-activity-public.interface.js';
 import { UpcomingActivitiesService } from './upcoming-activities.service.js';
 
@@ -79,8 +82,16 @@ export class ActivitiesController {
   complete(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<ServiceResponse<ActivityPublic>> {
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
     return this.activitiesService.complete(user.id, id);
+  }
+
+  @Patch(':id/uncomplete')
+  uncomplete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
+    return this.activitiesService.uncomplete(user.id, id);
   }
 
   @Patch(':id/cancel')
@@ -88,7 +99,7 @@ export class ActivitiesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CancelActivityDto,
-  ): Promise<ServiceResponse<ActivityPublic>> {
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
     return this.activitiesService.cancel(user.id, id, dto);
   }
 

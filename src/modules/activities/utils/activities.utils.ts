@@ -13,6 +13,10 @@ import type {
 } from '@prisma/client';
 import { ActivityType as ActivityTypeEnum } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
+import {
+  GUATEMALA_UTC_OFFSET_SECONDS,
+  localToday,
+} from '../../../common/utils/local-date.utils.js';
 import { WEATHER_CONDITION_LABELS } from '../../weather/constants/weather-conditions.constants.js';
 import type { WeatherConditionName } from '../../weather/constants/weather-conditions.constants.js';
 import type { HourlyForecastHour } from '../../weather/interfaces/hourly-forecast.interface.js';
@@ -259,16 +263,9 @@ export function computeActivityProbability(input: {
   });
 }
 
-// Desfase de Guatemala (UTC-6, sin horario de verano), la zona de los crons.
-// Se usa solo cuando la visita aún no tiene pronóstico horario con su desfase.
-const FALLBACK_UTC_OFFSET_SECONDS = -6 * 60 * 60;
-
-/** Fecha de hoy en hora de Guatemala, como medianoche UTC (igual que `Visit.date`). */
-export function localToday(now: Date = new Date()): Date {
-  const local = new Date(now.getTime() + FALLBACK_UTC_OFFSET_SECONDS * 1000);
-  local.setUTCHours(0, 0, 0, 0);
-  return local;
-}
+// Se re-exporta para no cambiar los importadores existentes; la definición
+// vive en common para que `visits` pueda usarla sin crear un ciclo.
+export { localToday };
 
 /**
  * Minutos que faltan para que empiece la actividad, en hora local de la
@@ -283,7 +280,7 @@ export function minutesUntilStart(
 ): number {
   const offsetSeconds =
     parseHourlyForecast(visit.hourlyForecast)?.utcOffsetSeconds ??
-    FALLBACK_UTC_OFFSET_SECONDS;
+    GUATEMALA_UTC_OFFSET_SECONDS;
   const localNowMs = now.getTime() + offsetSeconds * 1000;
   const startMs = visit.date.getTime() + minutesOfDay(startTime) * 60_000;
   return (startMs - localNowMs) / 60_000;

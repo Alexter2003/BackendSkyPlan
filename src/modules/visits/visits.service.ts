@@ -25,6 +25,12 @@ import type {
 } from './interfaces/visit-public.interface.js';
 import type { VisitForecastFields } from './utils/visits.utils.js';
 import {
+  emptyProgress,
+  getSingleVisitProgress,
+  getVisitProgress,
+  progressFromStates,
+} from './utils/visit-progress.utils.js';
+import {
   assertDateHasArrived,
   assertIsPlanned,
   assertNoVisitOnDate,
@@ -78,7 +84,7 @@ export class VisitsService {
       message: forecast?.snapshot
         ? 'Ubicación registrada exitosamente'
         : WEATHER_PENDING_MESSAGE,
-      data: toVisitPublic(visit),
+      data: toVisitPublic(visit, emptyProgress()),
     };
   }
 
@@ -87,11 +93,17 @@ export class VisitsService {
       where: { userId, isActive: true },
       orderBy: { date: 'asc' },
     });
+    const progress = await getVisitProgress(
+      this.prisma,
+      visits.map((visit) => visit.id),
+    );
 
     return {
       status: HttpStatus.OK,
       message: 'Ubicaciones obtenidas exitosamente',
-      data: visits.map(toVisitPublic),
+      data: visits.map((visit) =>
+        toVisitPublic(visit, progress.get(visit.id) ?? emptyProgress()),
+      ),
     };
   }
 
@@ -121,6 +133,9 @@ export class VisitsService {
         visit,
         visit.activities.map((activity) =>
           toActivityPublic(activity, visit.date),
+        ),
+        progressFromStates(
+          visit.activities.map((activity) => activity.state.name),
         ),
       ),
     };
@@ -191,7 +206,10 @@ export class VisitsService {
     return {
       status: HttpStatus.OK,
       message,
-      data: toVisitPublic(visit),
+      data: toVisitPublic(
+        visit,
+        await getSingleVisitProgress(this.prisma, visit.id),
+      ),
     };
   }
 
@@ -218,7 +236,10 @@ export class VisitsService {
     return {
       status: HttpStatus.OK,
       message: 'Visita finalizada exitosamente',
-      data: toVisitPublic(visit),
+      data: toVisitPublic(
+        visit,
+        await getSingleVisitProgress(this.prisma, visit.id),
+      ),
     };
   }
 
@@ -264,7 +285,10 @@ export class VisitsService {
     return {
       status: HttpStatus.OK,
       message: 'Visita cancelada exitosamente',
-      data: toVisitPublic(visit),
+      data: toVisitPublic(
+        visit,
+        await getSingleVisitProgress(this.prisma, visit.id),
+      ),
     };
   }
 

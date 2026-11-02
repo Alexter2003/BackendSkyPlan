@@ -53,7 +53,8 @@ además agrega `activities`:
   "windSpeed": 12.5,
   "weatherCode": 61,
   "weatherUpdate": "2026-09-20T12:00:00.000Z",
-  "createdAt": "2026-09-20T12:00:00.000Z"
+  "createdAt": "2026-09-20T12:00:00.000Z",
+  "progress": { "completed": 0, "total": 1 }
 }
 ```
 
@@ -74,6 +75,7 @@ además agrega `activities`:
 | `weatherCode` | number \| null | código WMO del clima (0 despejado, 51-57 llovizna, 61-67 lluvia, 71-77 nieve, etc.) |
 | `weatherUpdate` | string (ISO datetime) \| null | última vez que se consultó/actualizó el clima |
 | `createdAt` | string (ISO datetime) | |
+| `progress` | object | `{ completed, total }`: avance del checklist de la visita, ver "Progreso del checklist" abajo |
 
 Los ocho campos de clima (temperatura, precipitación, humedad, presión, nubosidad, viento, código y `weatherUpdate`) vienen todos `null` juntos cuando la fecha de la visita está a más
 de 10 días — ver la sección "Clima" más abajo.
@@ -83,18 +85,47 @@ probabilidad de cada actividad), pero **no forma parte del objeto `Visit`**: el 
 de cada actividad llega en `forecast` de `GET /api/activities/upcoming` (ver
 `docs/api/activities.md`).
 
+### Progreso del checklist (`progress`)
+
+Toda respuesta que trae una visita (crear, listar, detalle, editar, finalizar y cancelar) incluye
+`progress`:
+
+```json
+"progress": { "completed": 2, "total": 3 }
+```
+
+- `total`: actividades **activas** de la visita que están `planned` o `completed`.
+- `completed`: las que están `completed`.
+- Las actividades canceladas (por el usuario o por el sistema) y las eliminadas **no cuentan**.
+  Una visita sin actividades, o con todas canceladas, trae `{ "completed": 0, "total": 0 }`.
+
+Sirve para pintar "2 de 3" en la lista sin pedir el detalle de cada visita.
+
 ### Estados (`status`)
 
 | Valor | Significado | Cómo se llega |
 |---|---|---|
 | `PLANNED` | Estado inicial de toda visita nueva | valor por defecto al crear |
-| `COMPLETED` | El usuario marcó la visita como realizada | `PATCH /:id/complete` |
+| `COMPLETED` | La visita se realizó | `PATCH /:id/complete`, o **automáticamente** al completar o cancelar su última actividad pendiente (ver abajo) |
 | `CANCELLED` | El usuario canceló la visita sin eliminarla | `PATCH /:id/cancel` |
 
 Una visita que no está `PLANNED` queda **congelada**: no puede editarse (`PATCH /:id` la
 rechaza con `400`) ni volver a cambiar de estado (`complete`/`cancel` sobre ella también
-devuelven `400`). Cancelar o eliminar (`DELETE /:id`) son cosas distintas: cancelar la deja
+devuelven `400`). **Única excepción:** una visita `COMPLETED` vuelve a `PLANNED` si el usuario
+deshace una de sus actividades completadas (`PATCH /api/activities/:id/uncomplete`); una visita
+`CANCELLED` nunca se reabre. Cancelar o eliminar (`DELETE /:id`) son cosas distintas: cancelar la deja
 visible en las listas con `status: "CANCELLED"`; eliminar la oculta por completo (soft-delete).
+
+#### Cierre automático de la visita
+
+Una visita `PLANNED` pasa sola a `COMPLETED` cuando, tras completar o cancelar una de sus
+actividades (`PATCH /api/activities/:id/complete` o `/cancel`), ya no queda ninguna actividad
+`planned` y hay al menos una `completed`. La respuesta de esa acción trae `visitStatus` con el
+estado resultante. Detalle y casos límite en `docs/api/activities.md`
+("Estado de la visita en el checklist").
+
+`PATCH /:id/complete` sigue disponible para finalizar a mano (por ejemplo una visita sin
+actividades) y **no** modifica el estado de las actividades.
 
 ### Clima
 
@@ -159,7 +190,8 @@ pronóstico de Open-Meteo para esa fecha y ubicación:
     "windSpeed": 12.5,
     "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
-    "createdAt": "2026-09-20T12:00:00.000Z"
+    "createdAt": "2026-09-20T12:00:00.000Z",
+    "progress": { "completed": 0, "total": 0 }
   }
 }
 ```
@@ -209,7 +241,8 @@ fecha ascendente. Incluye visitas en cualquier `status` (`PLANNED`, `COMPLETED`,
       "windSpeed": 12.5,
       "weatherCode": 61,
       "weatherUpdate": "2026-09-20T12:00:00.000Z",
-      "createdAt": "2026-09-20T12:00:00.000Z"
+      "createdAt": "2026-09-20T12:00:00.000Z",
+      "progress": { "completed": 0, "total": 1 }
     }
   ]
 }
@@ -250,6 +283,7 @@ Cada actividad tiene la misma forma que en `docs/api/activities.md`.
     "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
     "createdAt": "2026-09-20T12:00:00.000Z",
+    "progress": { "completed": 0, "total": 1 },
     "activities": [
       {
         "id": 5,
@@ -327,6 +361,10 @@ Marca la visita como realizada (`status: "COMPLETED"`). Solo tiene sentido para 
 cuya fecha ya llegó — es la acción de "ya hice esta visita", no una forma de planearla por
 adelantado. Sin body.
 
+"La fecha ya llegó" se evalúa con el **día de Guatemala (UTC-6)**, no con el día UTC: a las
+19:00 de Guatemala la visita de mañana sigue sin poder finalizarse, aunque en UTC ya sea
+mañana. Solo cuenta la fecha: no se exige una hora.
+
 ### Respuesta exitosa — `200 OK`
 
 ```json
@@ -348,7 +386,8 @@ adelantado. Sin body.
     "windSpeed": 12.5,
     "weatherCode": 61,
     "weatherUpdate": "2026-09-20T12:00:00.000Z",
-    "createdAt": "2026-09-10T12:00:00.000Z"
+    "createdAt": "2026-09-10T12:00:00.000Z",
+    "progress": { "completed": 1, "total": 1 }
   }
 }
 ```

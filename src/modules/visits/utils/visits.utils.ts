@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { Visit } from '@prisma/client';
 import { Prisma, VisitStatus } from '@prisma/client';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
+import { localToday } from '../../../common/utils/local-date.utils.js';
 import type {
   DayForecast,
   WeatherSnapshot,
@@ -9,6 +10,7 @@ import type {
 import type { ActivityPublic } from '../../activities/interfaces/activity-public.interface.js';
 import type {
   VisitDetail,
+  VisitProgress,
   VisitPublic,
 } from '../interfaces/visit-public.interface.js';
 
@@ -35,7 +37,10 @@ export function formatTime(date: Date): string {
   return date.toISOString().slice(11, 16);
 }
 
-export function toVisitPublic(visit: Visit): VisitPublic {
+export function toVisitPublic(
+  visit: Visit,
+  progress: VisitProgress,
+): VisitPublic {
   return {
     id: visit.id,
     name: visit.name,
@@ -52,15 +57,17 @@ export function toVisitPublic(visit: Visit): VisitPublic {
     weatherCode: visit.weatherCode,
     weatherUpdate: visit.weatherUpdate,
     createdAt: visit.createdAt,
+    progress,
   };
 }
 
 export function toVisitDetail(
   visit: Visit,
   activities: ActivityPublic[],
+  progress: VisitProgress,
 ): VisitDetail {
   return {
-    ...toVisitPublic(visit),
+    ...toVisitPublic(visit, progress),
     activities,
   };
 }
@@ -142,7 +149,9 @@ export function assertIsPlanned(visit: Visit): void {
 }
 
 export function assertDateHasArrived(date: Date): void {
-  const today = startOfUtcDay(new Date());
+  // Día de Guatemala, no UTC: desde las 18:00 locales el día UTC ya es el
+  // siguiente y dejaría finalizar por adelantado la visita de mañana.
+  const today = localToday();
 
   if (date > today) {
     throw new BadRequestException(

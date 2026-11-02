@@ -100,8 +100,23 @@ describe('ActivitiesService', () => {
     $transaction: ReturnType<typeof vi.fn>;
   };
   let tx: {
-    visit: { create: ReturnType<typeof vi.fn> };
-    activity: { update: ReturnType<typeof vi.fn> };
+    $queryRaw: ReturnType<typeof vi.fn>;
+    visit: {
+      create: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+      findUniqueOrThrow: ReturnType<typeof vi.fn>;
+    };
+    activity: {
+      update: ReturnType<typeof vi.fn>;
+      count: ReturnType<typeof vi.fn>;
+    };
+  };
+  // Lo que ve la transacción después de actualizar la actividad: cuántas
+  // quedan planificadas/completadas y en qué estado está la visita.
+  let checklist: {
+    planned: number;
+    completed: number;
+    visitStatus: VisitStatus;
   };
   let weather: { getForecastRange: ReturnType<typeof vi.fn> };
 
@@ -145,9 +160,39 @@ describe('ActivitiesService', () => {
       $transaction: vi.fn(),
     };
 
+    checklist = { planned: 0, completed: 1, visitStatus: VisitStatus.PLANNED };
     tx = {
-      visit: { create: vi.fn().mockResolvedValue({ id: 99 }) },
-      activity: { update: prisma.activity.update },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      visit: {
+        create: vi.fn().mockResolvedValue({ id: 99 }),
+        updateMany: vi.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { status: VisitStatus };
+            data: { status: VisitStatus };
+          }) => {
+            if (checklist.visitStatus === where.status) {
+              checklist.visitStatus = data.status;
+              return { count: 1 };
+            }
+            return { count: 0 };
+          },
+        ),
+        findUniqueOrThrow: vi.fn(async () => ({
+          status: checklist.visitStatus,
+        })),
+      },
+      activity: {
+        update: prisma.activity.update,
+        count: vi.fn(
+          async ({ where }: { where: { state: { name: string } } }) =>
+            where.state.name === 'planned'
+              ? checklist.planned
+              : checklist.completed,
+        ),
+      },
     };
     prisma.$transaction = vi
       .fn()
@@ -461,6 +506,187 @@ describe('ActivitiesService', () => {
         BadRequestException,
       );
     });
+
+    it('takes the visit lock before updating the activity', async () => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow(),
+        visit: visitWith(sunnyWeather, {
+          date: new Date('2026-10-04T00:00:00Z'),
+        }),
+      });
+      const order: string[] = [];
+      tx.$queryRaw.mockImplementation(async () => {
+        order.push('lock');
+        return [];
+      });
+      prisma.activity.update.mockImplementation(async () => {
+        order.push('update');
+        return activityRow({ state: { id: 2, name: 'completed' } });
+      });
+
+      await service.complete(userId, 5);
+
+      expect(order).toEqual(['lock', 'update']);
+    });
+
+    describe('automatic visit completion', () => {
+      const dayOfVisit = new Date('2026-10-04T00:00:00Z');
+
+      function withActivity(visitOverrides: object = {}) {
+        prisma.activity.findFirst.mockResolvedValue({
+          ...activityRow(),
+          visit: visitWith(sunnyWeather, {
+            date: dayOfVisit,
+            ...visitOverrides,
+          }),
+        });
+      }
+
+      it('completes the visit when the last planned activity is completed', async () => {
+        withActivity();
+        checklist.planned = 0;
+        checklist.completed = 2;
+
+        const result = await service.complete(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.COMPLETED);
+        expect(tx.visit.updateMany).toHaveBeenCalledWith({
+          where: { id: 10, status: VisitStatus.PLANNED },
+          data: { status: VisitStatus.COMPLETED },
+        });
+      });
+
+      it('keeps the visit planned while other activities are pending', async () => {
+        withActivity();
+        checklist.planned = 2;
+        checklist.completed = 1;
+
+        const result = await service.complete(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.PLANNED);
+        expect(tx.visit.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('does not change a visit that is already completed', async () => {
+        withActivity();
+        checklist.visitStatus = VisitStatus.COMPLETED;
+
+        const result = await service.complete(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.COMPLETED);
+      });
+    });
+  });
+
+  describe('uncomplete', () => {
+    const completedRow = (visitOverrides: object = {}) => ({
+      ...activityRow({
+        stateId: 2,
+        state: { id: 2, name: 'completed' },
+        completedAt: new Date('2026-10-04T10:00:00Z'),
+      }),
+      visit: visitWith(sunnyWeather, {
+        date: new Date('2026-10-04T00:00:00Z'),
+        ...visitOverrides,
+      }),
+    });
+
+    it('returns a completed activity to planned and clears completedAt', async () => {
+      prisma.activity.findFirst.mockResolvedValue(completedRow());
+
+      const result = await service.uncomplete(userId, 5);
+
+      expect(prisma.activity.update.mock.calls[0][0].data).toEqual({
+        stateId: 1,
+        completedAt: null,
+      });
+      expect(result.message).toBe('Actividad desmarcada exitosamente');
+    });
+
+    it('keeps a planned visit planned', async () => {
+      prisma.activity.findFirst.mockResolvedValue(completedRow());
+      checklist.visitStatus = VisitStatus.PLANNED;
+
+      const result = await service.uncomplete(userId, 5);
+
+      expect(result.data.visitStatus).toBe(VisitStatus.PLANNED);
+    });
+
+    it('reopens a completed visit and reports it in visitStatus', async () => {
+      prisma.activity.findFirst.mockResolvedValue(
+        completedRow({ status: VisitStatus.COMPLETED }),
+      );
+      checklist.visitStatus = VisitStatus.COMPLETED;
+
+      const result = await service.uncomplete(userId, 5);
+
+      expect(result.data.visitStatus).toBe(VisitStatus.PLANNED);
+      expect(tx.visit.updateMany).toHaveBeenCalledWith({
+        where: { id: 10, status: VisitStatus.COMPLETED },
+        data: { status: VisitStatus.PLANNED },
+      });
+    });
+
+    it('rejects with 400 when the visit is cancelled', async () => {
+      prisma.activity.findFirst.mockResolvedValue(
+        completedRow({ status: VisitStatus.CANCELLED }),
+      );
+
+      await expect(service.uncomplete(userId, 5)).rejects.toThrow(
+        'La visita está cancelada',
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['planned', 1],
+      ['cancelled', 3],
+      ['cancelled_by_system', 4],
+    ])('rejects with 400 an activity that is %s', async (name, id) => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow({ state: { id, name } }),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await expect(service.uncomplete(userId, 5)).rejects.toThrow(
+        'La actividad no está completada',
+      );
+      expect(prisma.activity.update).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for an activity of another user', async () => {
+      prisma.activity.findFirst.mockResolvedValue(null);
+
+      await expect(service.uncomplete(userId, 5)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('takes the visit lock before updating the activity', async () => {
+      prisma.activity.findFirst.mockResolvedValue(completedRow());
+      const order: string[] = [];
+      tx.$queryRaw.mockImplementation(async () => {
+        order.push('lock');
+        return [];
+      });
+      prisma.activity.update.mockImplementation(async () => {
+        order.push('update');
+        return activityRow();
+      });
+
+      await service.uncomplete(userId, 5);
+
+      expect(order).toEqual(['lock', 'update']);
+    });
+
+    it('does not revalidate overlap or weather', async () => {
+      prisma.activity.findFirst.mockResolvedValue(completedRow());
+
+      await service.uncomplete(userId, 5);
+
+      expect(prisma.activity.findFirst).toHaveBeenCalledTimes(1);
+      expect(weather.getForecastRange).not.toHaveBeenCalled();
+    });
   });
 
   describe('cancel', () => {
@@ -515,6 +741,55 @@ describe('ActivitiesService', () => {
       await expect(service.cancel(userId, 5)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    describe('automatic visit completion', () => {
+      function withActivity(visitOverrides: object = {}) {
+        prisma.activity.findFirst.mockResolvedValue({
+          ...activityRow(),
+          visit: visitWith(sunnyWeather, visitOverrides),
+        });
+      }
+
+      it('completes the visit when cancelling the last pending activity leaves completed ones', async () => {
+        withActivity({ date: new Date('2026-10-04T00:00:00Z') });
+        checklist.planned = 0;
+        checklist.completed = 1;
+
+        const result = await service.cancel(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.COMPLETED);
+      });
+
+      it('keeps the visit planned when everything ends up cancelled', async () => {
+        withActivity({ date: new Date('2026-10-04T00:00:00Z') });
+        checklist.planned = 0;
+        checklist.completed = 0;
+
+        const result = await service.cancel(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.PLANNED);
+        expect(tx.visit.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('keeps a future visit planned', async () => {
+        withActivity();
+        checklist.planned = 0;
+        checklist.completed = 0;
+
+        const result = await service.cancel(userId, 5);
+
+        expect(result.data.visitStatus).toBe(VisitStatus.PLANNED);
+      });
+
+      it('takes the visit lock inside the transaction', async () => {
+        withActivity();
+
+        await service.cancel(userId, 5);
+
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -683,6 +958,7 @@ describe('ActivitiesService', () => {
 
       await service.reschedule(userId, 5, dto);
 
+      expect(tx.visit.updateMany).not.toHaveBeenCalled();
       expect(tx.visit.create).not.toHaveBeenCalled();
       expect(prisma.activity.update.mock.calls[0][0].data).toMatchObject({
         visitId: 11,
@@ -835,6 +1111,18 @@ describe('ActivitiesService', () => {
         data: { isActive: false },
       });
       expect(result.data).toBeNull();
+    });
+
+    it('does not change the visit status', async () => {
+      prisma.activity.findFirst.mockResolvedValue({
+        ...activityRow(),
+        visit: visitWith(sunnyWeather),
+      });
+
+      await service.remove(userId, 5);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.visit.updateMany).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException for an activity of another user', async () => {
