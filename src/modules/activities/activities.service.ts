@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { VisitStatus } from '@prisma/client';
 import type { Visit } from '@prisma/client';
 import type { ServiceResponse } from '../../common/interfaces/service-response.interface.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -27,7 +28,10 @@ import type { CreateActivityDto } from './dto/create-activity.dto.js';
 import type { ListActivitiesQueryDto } from './dto/list-activities-query.dto.js';
 import type { RescheduleActivityDto } from './dto/reschedule-activity.dto.js';
 import type { UpdateActivityDto } from './dto/update-activity.dto.js';
-import type { ActivityPublic } from './interfaces/activity-public.interface.js';
+import type {
+  ActivityChecklistResult,
+  ActivityPublic,
+} from './interfaces/activity-public.interface.js';
 import {
   ACTIVITY_INCLUDE,
   ACTIVITY_STATE,
@@ -43,6 +47,11 @@ import {
   toActivityPublic,
 } from './utils/activities.utils.js';
 import type { ActivityWithRelations } from './utils/activities.utils.js';
+import {
+  lockVisit,
+  reopenVisitIfCompleted,
+  syncVisitCompletion,
+} from './utils/visit-checklist.utils.js';
 
 const VIABILITY_PENDING_MESSAGE =
   'Actividad guardada. Se validará contra el clima cuando la fecha esté dentro de los próximos 10 días';
@@ -262,22 +271,81 @@ export class ActivitiesService {
   async complete(
     userId: number,
     id: number,
-  ): Promise<ServiceResponse<ActivityPublic>> {
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
     const existing = await this.findOwnedActivity(userId, id);
     this.assertActivityIsPlanned(existing);
     assertDateHasArrived(existing.visit.date);
 
     const stateId = await this.getStateId(ACTIVITY_STATE.COMPLETED);
-    const activity = await this.prisma.activity.update({
-      where: { id },
-      data: { stateId, completedAt: new Date() },
-      include: ACTIVITY_INCLUDE,
-    });
+    // El check y el posible cierre de la visita van en una transacción con la
+    // visita bloqueada, para que dos checks simultáneos no la dejen abierta.
+    const { activity, visitStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        await lockVisit(tx, existing.visitId);
+        const updated = await tx.activity.update({
+          where: { id },
+          data: { stateId, completedAt: new Date() },
+          include: ACTIVITY_INCLUDE,
+        });
+        return {
+          activity: updated,
+          visitStatus: await syncVisitCompletion(tx, existing.visitId),
+        };
+      },
+    );
 
     return {
       status: HttpStatus.OK,
       message: 'Actividad completada exitosamente',
-      data: toActivityPublic(activity, existing.visit.date),
+      data: {
+        ...toActivityPublic(activity, existing.visit.date),
+        visitStatus,
+      },
+    };
+  }
+
+  // Deshace un check equivocado: la actividad completada vuelve a planificada.
+  // Si con ese check la visita se había cerrado (sola o a mano), se reabre; es
+  // la única vía por la que una visita deja de estar finalizada. Con la visita
+  // cancelada no se puede: quedó congelada.
+  async uncomplete(
+    userId: number,
+    id: number,
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
+    const existing = await this.findOwnedActivity(userId, id);
+
+    if (existing.state.name !== ACTIVITY_STATE.COMPLETED) {
+      throw new BadRequestException('La actividad no está completada');
+    }
+    if (existing.visit.status === VisitStatus.CANCELLED) {
+      throw new BadRequestException('La visita está cancelada');
+    }
+
+    // No se revalida el cruce de horario: una actividad completada sigue
+    // ocupando su franja, así que nadie pudo tomarla mientras tanto.
+    const stateId = await this.getStateId(ACTIVITY_STATE.PLANNED);
+    const { activity, visitStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        await lockVisit(tx, existing.visitId);
+        const updated = await tx.activity.update({
+          where: { id },
+          data: { stateId, completedAt: null },
+          include: ACTIVITY_INCLUDE,
+        });
+        return {
+          activity: updated,
+          visitStatus: await reopenVisitIfCompleted(tx, existing.visitId),
+        };
+      },
+    );
+
+    return {
+      status: HttpStatus.OK,
+      message: 'Actividad desmarcada exitosamente',
+      data: {
+        ...toActivityPublic(activity, existing.visit.date),
+        visitStatus,
+      },
     };
   }
 
@@ -288,25 +356,37 @@ export class ActivitiesService {
     userId: number,
     id: number,
     dto: CancelActivityDto = {},
-  ): Promise<ServiceResponse<ActivityPublic>> {
+  ): Promise<ServiceResponse<ActivityChecklistResult>> {
     const existing = await this.findOwnedActivity(userId, id);
     this.assertActivityIsPlanned(existing);
 
     const stateId = await this.getStateId(ACTIVITY_STATE.CANCELLED);
-    const activity = await this.prisma.activity.update({
-      where: { id },
-      data: {
-        stateId,
-        cancelledAt: new Date(),
-        cancelReason: dto.reason ?? null,
+    const { activity, visitStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        await lockVisit(tx, existing.visitId);
+        const updated = await tx.activity.update({
+          where: { id },
+          data: {
+            stateId,
+            cancelledAt: new Date(),
+            cancelReason: dto.reason ?? null,
+          },
+          include: ACTIVITY_INCLUDE,
+        });
+        return {
+          activity: updated,
+          visitStatus: await syncVisitCompletion(tx, existing.visitId),
+        };
       },
-      include: ACTIVITY_INCLUDE,
-    });
+    );
 
     return {
       status: HttpStatus.OK,
       message: 'Actividad cancelada exitosamente',
-      data: toActivityPublic(activity, existing.visit.date),
+      data: {
+        ...toActivityPublic(activity, existing.visit.date),
+        visitStatus,
+      },
     };
   }
 

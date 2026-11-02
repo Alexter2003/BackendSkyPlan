@@ -219,6 +219,17 @@ describe('ActivityAutoCancelService', () => {
     expect(viability.evaluateVisitActivities).toHaveBeenCalledTimes(1);
   });
 
+  it('never changes the visit status when it cancels activities', async () => {
+    freshForecast(95);
+
+    const result = await service.run(NOW);
+
+    expect(result.cancelled).toBe(1);
+    for (const [args] of prisma.visit.update.mock.calls) {
+      expect(args.data).not.toHaveProperty('status');
+    }
+  });
+
   it('never cancels without data: no fresh forecast and a stale stored one', async () => {
     prisma.activity.findMany.mockResolvedValue([
       candidate(

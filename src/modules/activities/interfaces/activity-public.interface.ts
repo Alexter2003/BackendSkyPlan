@@ -1,4 +1,4 @@
-import type { ActivityType } from '@prisma/client';
+import type { ActivityType, VisitStatus } from '@prisma/client';
 import type { ProbabilityBand } from '../constants/activity-probability.constants.js';
 
 export interface ActivityState {
@@ -33,4 +33,12 @@ export interface ActivityPublic {
   cancelReason: string | null;
   cancelledAt: Date | null;
   weatherConditions: ActivityWeatherCondition[];
+}
+
+// Respuesta de las acciones del checklist (completar, cancelar, deshacer): la
+// actividad más el estado resultante de su visita, que puede haber cambiado
+// sola (cierre automático o reapertura), para que el cliente no tenga que
+// pedir la visita de nuevo después de cada check.
+export interface ActivityChecklistResult extends ActivityPublic {
+  visitStatus: VisitStatus;
 }
